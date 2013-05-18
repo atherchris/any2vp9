@@ -53,9 +53,12 @@ class AVFile:
 
 	MPLAYER_CODEC_MAP = {
 		'ffaac' : 'AAC',
+		'ffac3' : 'AC-3',
 		'ffflac' : 'FLAC',
 		'ffh264' : 'H.264',
+		'fflpcm' : 'PCM',
 		'ffmpeg1' : 'MPEG-1',
+		'ffmpeg2' : 'MPEG-2',
 		'ffvorbis' : 'Vorbis',
 		'ffvp8' : 'VP8',
 		'mpg123' : 'MP3'
@@ -73,7 +76,7 @@ class AVFile:
 	mkvmerge_probe_audio_re = re.compile( r'^Track ID (\d+): audio \((.+)\)', re.M )
 	mkvmerge_probe_subtitles_re = re.compile( r'^Track ID (\d+): subtitles \((.+)\)$', re.M )
 
-	def __init__( self, path, disc_type=None, disc_title=1 ):
+	def __init__( self, path, disc_type=None, disc_title=1, size=None, rate=None ):
 		self.path = os.path.abspath( path )
 
 		if disc_type == 'bluray':
@@ -102,7 +105,7 @@ class AVFile:
 				subtitles_mat = self.mkvmerge_probe_subtitles_re.search( mkvmerge_probe_output )
 
 				self.has_chapters = mkvmerge_probe_output.find( 'Chapters' ) != -1
-				if audio_mat.group( 2 ) == 'A_VORBIS':
+				if audio_mat.group( 2 ) == 'A_VORBIS' or audio_mat.group( 2 ) == 'A_FLAC' or audio_mat.group( 2 ) == 'A_AAC':
 					self.audio_track_id = int( audio_mat.group( 1 ) )
 				if subtitles_mat is not None:
 					self.has_subtitles = True
@@ -128,14 +131,20 @@ class AVFile:
 		self.audio_format = self.MPLAYER_CODEC_MAP[ audio_codec_mat.group( 1 ) ]
 
 		# Get video size and frame rate
-		self.video_dimensions = [ int( video_spec_mat.group( 2 ) ), int( video_spec_mat.group( 3 ) ) ]
-		self.video_framerate_float = float( video_spec_mat.group( 4 ) )
-		if abs( math.ceil( self.video_framerate_float ) / 1.001 - self.video_framerate_float ) / self.video_framerate_float < 0.00001:
-			self.video_framerate_frac = [ math.ceil( self.video_framerate_float ) * 1000, 1001 ]
-		else:
-			video_framerate_frac2 = fractions.Fraction( self.video_framerate_float )
-			self.video_framerate_frac = [ video_framerate_frac2.numerator, video_framerate_frac2.denominator ]
-		self.video_framerate_float = float( self.video_framerate_frac[0] ) / float( self.video_framerate_frac[1] )
+		if disc_type != 'bluray':
+			self.video_dimensions = [ int( video_spec_mat.group( 2 ) ), int( video_spec_mat.group( 3 ) ) ]
+			self.video_framerate_float = float( video_spec_mat.group( 4 ) )
+			if abs( math.ceil( self.video_framerate_float ) / 1.001 - self.video_framerate_float ) / self.video_framerate_float < 0.00001:
+				self.video_framerate_frac = [ math.ceil( self.video_framerate_float ) * 1000, 1001 ]
+			else:
+				video_framerate_frac2 = fractions.Fraction( self.video_framerate_float )
+				self.video_framerate_frac = [ video_framerate_frac2.numerator, video_framerate_frac2.denominator ]
+			self.video_framerate_float = float( self.video_framerate_frac[0] ) / float( self.video_framerate_frac[1] )
+		if size is not None:
+			self.video_dimensions = size
+		if rate is not None:
+			self.video_framerate_frac = rate
+			self.video_framerate_float = float( rate[0] ) / float( rate[1] )
 
 		# Get audio sample rate and channel count
 		self.audio_samplerate = int( audio_spec_mat.group( 1 ) )
@@ -168,14 +177,19 @@ class AVFile:
 			os.chdir( old_cwd )
 
 	def extract_audio( self, path ):
-		assert self.audio_format == 'Vorbis'
-		if self.container_format == 'Matroska':
+		assert self.container_format == 'Matroska'
+		assert self.audio_format == 'Vorbis' or self.audio_format == 'FLAC' or self.audio_format == 'AAC'
+		if self.audio_format == 'Vorbis':
+			subprocess.check_call( [ 'mkvextract', 'tracks', self.path, str( self.audio_track_id ) + ':' + path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		elif self.audio_format == 'FLAC':
+			subprocess.check_call( [ 'mkvextract', 'tracks', self.path, str( self.audio_track_id ) + ':' + path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		elif self.audio_format == 'AAC':
 			subprocess.check_call( [ 'mkvextract', 'tracks', self.path, str( self.audio_track_id ) + ':' + path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 	def decode_audio( self, path ):
-		subprocess.check_call( [ 'mplayer', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channelcnt ), '-af', 'format=s16le', '-ao', 'pcm:fast:file=' + path ] + self.mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		subprocess.check_call( [ 'mplayer', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channelcnt ), '-ao', 'pcm:fast:file=' + path ] + self.mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
-	def start_decode_video( self, path, deinterlace=False, ivtc=False, crop=None, scale=None ):
+	def start_decode_video( self, deinterlace=False, ivtc=False, crop=None, scale=None ):
 		filters = 'scale,format=i420,'
 		if_ofps = []
 		if ivtc:
@@ -188,10 +202,52 @@ class AVFile:
 		if scale:
 			filters += 'scale=' + str( scale[0] ) + ':' + str( scale[1] ) + ','
 		filters += 'hqdn3d,harddup'
-		return subprocess.Popen( [ 'mencoder', '-nosound', '-nosub', '-sws', '9', '-vf', filters ] + if_ofps + [ '-ovc', 'raw', '-of', 'rawvideo', '-o', path ] + self.mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		return subprocess.Popen( [ 'mencoder', '-quiet', '-really-quiet', '-nosound', '-nosub', '-sws', '9', '-vf', filters ] + if_ofps + [ '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ] + self.mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
+
+def decode_aac_audio( in_path, out_path ):
+	subprocess.check_call( [ 'faad', '-b', '4', '-o', out_path, in_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+
+def decode_flac_audio( in_path, out_path ):
+	subprocess.check_call( [ 'flac', '-d', '-o', out_path, in_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 def encode_vorbis_audio( in_path, out_path ):
-	subprocess.check_call( [ 'oggenc', '-o', out_path, in_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	subprocess.check_call( [ 'oggenc', '--discard-comments', '-o', out_path, in_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+
+def start_encode_vp8_video_pass_1( in_pipe, stats_path, dimensions, framerate, high_quality=False ):
+	if high_quality:
+		bitrate = 3200
+		cq_level = 1
+	else:
+		bitrate = 1700
+		cq_level = 4
+	if dimensions[1] < 480:
+		token_parts = 0
+	elif dimensions[1] < 720:
+		token_parts = 1
+	elif dimensions[1] < 1080:
+		token_parts = 2
+	else:
+		token_parts = 3
+	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
+	return subprocess.Popen( [ 'vpxenc', '--passes=2', '--pass=1', '--fpf=' + stats_path, '--threads=' + str( multiprocessing.cpu_count() ), '--best', '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=24', '--auto-alt-ref=1', '--token-parts=' + str( token_parts ), '--cq-level=' + str( cq_level ), '--kf-max-dist=' + str( kf_max_dist ), '--i420', '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--ivf', '--output=' + os.devnull, '-' ], stdin=in_pipe, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+
+def start_encode_vp8_video_pass_2( in_pipe, stats_path, out_path, dimensions, framerate, high_quality=False ):
+	if high_quality:
+		bitrate = 3200
+		cq_level = 1
+	else:
+		bitrate = 1700
+		cq_level = 4
+	if dimensions[1] < 480:
+		token_parts = 0
+	elif dimensions[1] < 720:
+		token_parts = 1
+	elif dimensions[1] < 1080:
+		token_parts = 2
+	else:
+		token_parts = 3
+	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
+	return subprocess.Popen( [ 'vpxenc', '--passes=2', '--pass=2', '--fpf=' + stats_path, '--threads=' + str( multiprocessing.cpu_count() ), '--best', '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=24', '--auto-alt-ref=1', '--token-parts=' + str( token_parts ), '--cq-level=' + str( cq_level ), '--kf-max-dist=' + str( kf_max_dist ), '--i420', '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--ivf', '--output=' + out_path, '-' ], stdin=in_pipe, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 def start_encode_vp8_video( in_path, out_path, dimensions, framerate ):
 	if dimensions[1] < 480:
@@ -203,7 +259,7 @@ def start_encode_vp8_video( in_path, out_path, dimensions, framerate ):
 	else:
 		token_parts = 3
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
-	return subprocess.Popen( [ 'vpxenc', '--passes=2', '--threads=' + str( multiprocessing.cpu_count() ), '--best', '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=1700', '--min-q=0', '--max-q=24', '--auto-alt-ref=1', '--token-parts=' + str( token_parts ), '--cq-level=8', '--kf-max-dist=' + str( kf_max_dist ), '--i420', '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--output=' + out_path, in_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	return subprocess.Popen( [ 'vpxenc', '--passes=2', '--threads=' + str( multiprocessing.cpu_count() ), '--best', '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=1700', '--min-q=0', '--max-q=24', '--auto-alt-ref=1', '--token-parts=' + str( token_parts ), '--cq-level=4', '--kf-max-dist=' + str( kf_max_dist ), '--i420', '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--ivf', '--output=' + out_path, in_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 def mux_matroska( path, video, audio, subtitles=None, attachments=None, chapters=None, title=None, video_lang=None, audio_lang=None, subtitles_lang=None, display_aspect=None, pixel_aspect=None, display_size=None ):
 	command = [ 'mkvmerge' ]
@@ -254,6 +310,7 @@ def main( argv=None ):
 	command_line_parser.add_argument( 'input', help='Input video file', metavar='FILE' )
 	command_line_parser.add_argument( '-o', '--output', required=True, help='Path for output file', metavar='FILE' )
 	command_line_parser.add_argument( '-I', '--info', action='store_true', help='Display input information' )
+	command_line_parser.add_argument( '-H', '--high-quality', action='store_true', help='Use higher quality settings' )
 
 	command_line_metadata_group = command_line_parser.add_argument_group( 'metadata' )
 	command_line_metadata_group.add_argument( '-t', '--title', help='Specify a title for the video' )
@@ -265,6 +322,8 @@ def main( argv=None ):
 	command_line_disc_group.add_argument( '-D', '--dvd', action='store_true', help='Indicate that the soure is a DVD' )
 	command_line_disc_group.add_argument( '-B', '--bluray', action='store_true', help='Indicate that the soure is a Blu-ray' )
 	command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='Specify disc title number', metavar='NUM' )
+	command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='Specify input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
+	command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='Specify input frame rate (required for --bluray)', metavar=( 'N', 'D' ) )
 
 	command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
 	command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='Perform deinterlacing' )
@@ -282,11 +341,27 @@ def main( argv=None ):
 
 	command_line = command_line_parser.parse_args( argv[1:] )
 
+	if command_line.bluray:
+		if not command_line.size:
+			print( 'Error: You must manually input the size of the input for Blu-ray sources!' )
+			return 1
+		if not command_line.rate:
+			print( 'Error: You must manually input the frame rate of the input for Blu-ray sources!' )
+			return 1
+
 	if not command_line.no_nice:
 		os.nice( 10 )
 
 	print( 'Processing ' + os.path.basename( command_line.input ) + ' ...' )
-	avfile = AVFile( command_line.input )
+
+	if command_line.dvd:
+		disc_type = 'dvd'
+	elif command_line.bluray:
+		disc_type = 'bluray'
+	else:
+		disc_type = None
+
+	avfile = AVFile( command_line.input, disc_type, command_line.disc_title, command_line.size, command_line.rate )
 
 	if command_line.info:
 		print( 'Printing probe data ...' )
@@ -331,6 +406,21 @@ def main( argv=None ):
 		if avfile.container_format == 'Matroska' and avfile.audio_format == 'Vorbis':
 			print( 'Extracting Vorbis audio ...' )
 			avfile.extract_audio( enc_audio_path )
+		elif avfile.container_format == 'Matroska' and avfile.audio_format == 'FLAC':
+			flac_audio_path = os.path.join( work_dir, 'audio.flac' )
+			print( 'Extracting FLAC audio ...' )
+			avfile.extract_audio( flac_audio_path )
+			print( 'Encoding audio ...' )
+			encode_vorbis_audio( flac_audio_path, enc_audio_path )
+		elif avfile.container_format == 'Matroska' and avfile.audio_format == 'AAC':
+			aac_audio_path = os.path.join( work_dir, 'audio.aac' )
+			dec_audio_path = os.path.join( work_dir, 'audio.wav' )
+			print( 'Extracting AAC audio ...' )
+			avfile.extract_audio( aac_audio_path )
+			print( 'Decoding AAC audio ...' )
+			decode_aac_audio( aac_audio_path, dec_audio_path )
+			print( 'Encoding audio ...' )
+			encode_vorbis_audio( dec_audio_path, enc_audio_path )
 		else:
 			dec_audio_path = os.path.join( work_dir, 'audio.wav' )
 			print( 'Decoding audio ...' )
@@ -338,19 +428,36 @@ def main( argv=None ):
 			print( 'Encoding audio ...' )
 			encode_vorbis_audio( dec_audio_path, enc_audio_path )
 
-		dec_video_path = os.path.join( work_dir, 'video.i420' )
-		enc_video_path = os.path.join( work_dir, 'video.webm' )
-		os.mkfifo( dec_video_path )
+		enc_stats_path = os.path.join( work_dir, 'vpx_stats' )
+		enc_video_path = os.path.join( work_dir, 'video.ivf' )
+
+		if command_line.scale:
+			out_video_dimensions = command_line.scale
+		elif command_line.crop:
+			out_video_dimensions = command_line.crop[0:2]
+		else:
+			out_video_dimensions = avfile.video_dimensions
+
+		if command_line.ivtc:
+			out_video_framerate = [ 24000, 1001 ]
+		else:
+			out_video_framerate = avfile.video_framerate_frac
 
 		print( 'Encoding video (pass 1) ...' )
-		dec_proc = avfile.start_decode_video( dec_video_path, command_line.deinterlace, command_line.ivtc, command_line.crop, command_line.scale )
-		enc_proc = start_encode_vp8_video( dec_video_path, enc_video_path, avfile.video_dimensions, avfile.video_framerate_frac )
+		dec_proc = avfile.start_decode_video( command_line.deinterlace, command_line.ivtc, command_line.crop, command_line.scale )
+		enc_proc = start_encode_vp8_video_pass_1( dec_proc.stdout, enc_stats_path, out_video_dimensions, out_video_framerate, command_line.high_quality )
+		dec_proc.stdout.close()
 		if dec_proc.wait():
 			print( 'Error: Error occurred in decoding process!' )
 			return 1
+		if enc_proc.wait():
+			print( 'Error: Error occurred in encoding process!' )
+			return 1
 
 		print( 'Encoding video (pass 2) ...' )
-		dec_proc = avfile.start_decode_video( dec_video_path, command_line.deinterlace, command_line.ivtc, command_line.crop, command_line.scale )
+		dec_proc = avfile.start_decode_video( command_line.deinterlace, command_line.ivtc, command_line.crop, command_line.scale )
+		enc_proc = start_encode_vp8_video_pass_2( dec_proc.stdout, enc_stats_path, enc_video_path, out_video_dimensions, out_video_framerate, command_line.high_quality )
+		dec_proc.stdout.close()
 		if dec_proc.wait():
 			print( 'Error: Error occurred in decoding process!' )
 			return 1
@@ -363,7 +470,8 @@ def main( argv=None ):
 
 		print( 'Cleaning up ...' )
 
-	print( 'File size ratio: ' + str( round( float( os.path.getsize( command_line.output ) ) / float( os.path.getsize( command_line.input ) ), 3 ) ) )
+	if not command_line.bluray:
+		print( 'File size ratio: ' + str( round( float( os.path.getsize( command_line.output ) ) / float( os.path.getsize( command_line.input ) ), 3 ) ) )
 	print( 'Done. Process took ' + str( round( time.time() - process_start_time ) ) + ' seconds.' )
 	return 0
 
