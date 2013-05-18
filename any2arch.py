@@ -44,6 +44,8 @@ command_line_parser = argparse.ArgumentParser( description='Convert videos to ar
 command_line_parser.add_argument( 'input', help='Input video file', metavar='FILE' )
 command_line_parser.add_argument( '-o', '--output', required=True, help='Path for output file', metavar='FILE' )
 command_line_parser.add_argument( '-H', '--high-quality', action='store_true', help='Use higher quality settings' )
+command_line_parser.add_argument( '--start-chapter', type=int, help='Start at specific chapter', metavar='NUM' )
+command_line_parser.add_argument( '--end-chapter', type=int, help='Stop at specific chapter', metavar='NUM' )
 
 command_line_metadata_group = command_line_parser.add_argument_group( 'metadata' )
 command_line_metadata_group.add_argument( '-t', '--title', help='Specify a title for the video' )
@@ -57,7 +59,7 @@ command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', 
 command_line_disc_mutex_group.add_argument( '-B', '--bluray', action='store_true', help='Indicate that the soure is a Blu-ray' )
 command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='Specify disc title number', metavar='NUM' )
 command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='Force input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
-command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='Force input frame rate (required for --bluray)', metavar=( 'N', 'D' ) )
+command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='Force input frame rate (required for --bluray and progressive --dvd)', metavar=( 'N', 'D' ) )
 
 command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
 command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='Perform deinterlacing' )
@@ -99,6 +101,15 @@ elif command_line.bluray:
 	mplayer_input_args = [ '-bluray-device', command_line.input, 'bluray://' + str( command_line.disc_title ) ]
 else:
 	mplayer_input_args = [ command_line.input ]
+if command_line.start_chapter:
+	mplayer_input_args.append( '-chapter' )
+	if command_line.stop_chapter:
+		mplayer_input_args.append( str( command_line.start_chapter ) + '-' + str( command_line.end_chapter ) )
+	else:
+		mplayer_input_args.append( str( command_line.start_chapter ) )
+elif command_line.end_chapter:
+	mplayer_input_args.append( '-chapter' )
+	mplayer_input_args.append( '-' + str( command_line.end_chapter ) )
 
 # Probe input file
 mplayer_probe_output = subprocess.check_output( [ 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '0' ] + mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
@@ -120,19 +131,33 @@ if not command_line.no_chapters:
 		haschapters = mkvmerge_probe_output.find( 'Chapters: ' ) != -1
 		if haschapters:
 			print( 'Extracting chapters ...' )
-			chapters_path = os.path.join( work_dir.name, 'chapters' )
-			chapters_file = open( chapters_path, 'w' )
-			subprocess.check_call( [ 'mkvextract', 'chapters', command_line.input, '-s' ], stdout=chapters_file, stderr=subprocess.DEVNULL )
-			chapters_file.close()
+			chapters = subprocess.check_output( [ 'mkvextract', 'chapters', command_line.input, '-s' ], stderr=subprocess.DEVNULL ).decode()
 	elif command_line.dvd:
 		haschapters = True
 		print( 'Extracting chapters ...' )
-		chapters_path = os.path.join( work_dir.name, 'chapters' )
-		chapters_file = open( chapters_path, 'w' )
-		subprocess.check_call( [ 'dvdxchap', '-t', str( command_line.disc_title ), command_line.input ], stdout=chapters_file, stderr=subprocess.DEVNULL )
-		chapters_file.close()
+		chapters = subprocess.check_output( [ 'dvdxchap', '-t', str( command_line.disc_title ), command_line.input ], stderr=subprocess.DEVNULL ).decode()
 	else:
 		haschapters = False
+
+	if haschapters:
+		if command_line.start_chapter or command_line.end_chapter:
+			new_chapters = ''
+			if command_line.start_chapter:
+				chapters_offset = command_line.start_chapter - 1
+			else:
+				chapters_offset = 0
+			for line in chapters.splitlines():
+				mat = re.match( r'^CHAPTER(\d+)(.*)', line )
+				num = int( mat.group( 1 ) )
+				if ( not command_line.start_chapter or num >= command_line.start_chapter ) and ( not command_line.end_chapter or num <= command_line.end_chapter ):
+					new_chapters = new_chapters + 'CHAPTER' + str( num - chapters_offset ).zfill( 2 ) + mat.group( 2 ) + os.linesep
+			chapters = new_chapters
+		chapters_path = os.path.join( work_dir.name, 'chapters' )
+		with open( chapters_path, 'w' ) as chapters_file:
+			chapters_file.write( chapters )
+	elif command_line.start_chapter or command_line.end_chapter:
+		print( 'ERROR: No chapters available for --start-chapter or --end-chapter!' )
+		exit( 1 )
 else:
 	haschapters = False
 
@@ -169,12 +194,12 @@ else:
 # Decode/extract/encode audio
 if in_ismatroska and mkvmerge_probe_output.count( ' audio ' ) > 1:
 	print( 'WARNING: Source has multiple audio tracks!' )
-if audio_codec_mat.group( 1 ) == 'ffvorbis' and in_ismatroska:
+if audio_codec_mat.group( 1 ) == 'ffvorbis' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
 	print( 'Extracting Vorbis audio ...' )
 	ogg_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
 	
 	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + ogg_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-elif audio_codec_mat.group( 1 ) == 'ffflac' and in_ismatroska:
+elif audio_codec_mat.group( 1 ) == 'ffflac' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
 	print( 'Extracting FLAC audio ...' )
 	flac_audio_path = os.path.join( work_dir.name, 'audio.flac' )
 	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + flac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
@@ -182,7 +207,7 @@ elif audio_codec_mat.group( 1 ) == 'ffflac' and in_ismatroska:
 	print( 'Encoding audio ...' )
 	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
 	subprocess.check_call( [ 'oggenc', '--discard-comments', '-o', enc_audio_path, flac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-elif audio_codec_mat.group( 1 ) == 'ffaac' and in_ismatroska:
+elif audio_codec_mat.group( 1 ) == 'ffaac' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
 	print( 'Extracting AAC audio ...' )
 	aac_audio_path = os.path.join( work_dir.name, 'audio.m4a' )
 	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + aac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
@@ -236,6 +261,8 @@ filters = 'format=i420,'
 if command_line.ivtc:
 	filters += 'pullup,softskip,'
 	ofps = [ '-ofps', '24000/1001' ]
+elif command_line.rate:
+	ofps = [ '-ofps', '/'.join( map( str, command_line.rate ) ) ]
 else:
 	ofps = []
 if command_line.deinterlace:
