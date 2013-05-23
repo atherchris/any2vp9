@@ -27,6 +27,7 @@
 #
 
 import argparse
+import datetime
 import fractions
 import glob
 import math
@@ -103,7 +104,7 @@ else:
 	mplayer_input_args = [ command_line.input ]
 if command_line.start_chapter:
 	mplayer_input_args.append( '-chapter' )
-	if command_line.stop_chapter:
+	if command_line.end_chapter:
 		mplayer_input_args.append( str( command_line.start_chapter ) + '-' + str( command_line.end_chapter ) )
 	else:
 		mplayer_input_args.append( str( command_line.start_chapter ) )
@@ -143,14 +144,36 @@ if not command_line.no_chapters:
 		if command_line.start_chapter or command_line.end_chapter:
 			new_chapters = ''
 			if command_line.start_chapter:
-				chapters_offset = command_line.start_chapter - 1
+				chapters_offset_index = command_line.start_chapter - 1
+				mat = re.search( r'^CHAPTER' + str( command_line.start_chapter ).zfill( 2 ) + r'=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$', chapters, re.M )
+				if not mat:
+					print( 'ERROR: Start chapter could not be found!' )
+					exit( 1 )
+				chapters_offset_time = datetime.timedelta( hours=int( mat.group( 1 ) ), minutes=int( mat.group( 2 ) ), seconds=int( mat.group( 3 ) ), milliseconds=int( mat.group( 4 ) ) )
 			else:
-				chapters_offset = 0
+				chapters_offset_index = 0
+				chapters_offset_time = datetime.timedelta()
 			for line in chapters.splitlines():
-				mat = re.match( r'^CHAPTER(\d+)(.*)', line )
-				num = int( mat.group( 1 ) )
-				if ( not command_line.start_chapter or num >= command_line.start_chapter ) and ( not command_line.end_chapter or num <= command_line.end_chapter ):
-					new_chapters = new_chapters + 'CHAPTER' + str( num - chapters_offset ).zfill( 2 ) + mat.group( 2 ) + os.linesep
+				mat = re.match( r'^CHAPTER(\d+)=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$', line )
+				if mat and ( not command_line.start_chapter or int( mat.group( 1 ) ) >= command_line.start_chapter ) and ( not command_line.end_chapter or int( mat.group( 1 ) ) <= command_line.end_chapter ):
+					new_time = datetime.timedelta( hours=int( mat.group( 2 ) ), minutes=int( mat.group( 3 ) ), seconds=int( mat.group( 4 ) ), milliseconds=int( mat.group( 5 ) ) ) - chapters_offset_time
+					new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - chapters_offset_index ).zfill( 2 ) + '='
+					new_time_hours = math.floor( new_time.total_seconds() / 3600 )
+					new_chapters += str( new_time_hours ).zfill( 2 ) + ':'
+					new_time_minutes = math.floor( ( new_time.total_seconds() - new_time_hours * 3600 ) / 60 )
+					new_chapters += str( new_time_minutes ).zfill( 2 ) + ':'
+					new_time_seconds = math.floor( new_time.total_seconds() - new_time_hours * 3600 - new_time_minutes * 60 )
+					new_chapters += str( new_time_seconds ).zfill( 2 ) + '.'
+					new_time_milliseconds = round( ( new_time.total_seconds() - new_time_hours * 3600 - new_time_minutes * 60 - new_time_seconds ) * 1000 )
+					new_chapters += str( new_time_milliseconds ).zfill( 2 ) + os.linesep
+				else:
+					mat = re.match( r'CHAPTER(\d+)NAME=Chapter (\d+)$', line )
+					if mat and ( not command_line.start_chapter or int( mat.group( 1 ) ) >= command_line.start_chapter ) and ( not command_line.end_chapter or int( mat.group( 1 ) ) <= command_line.end_chapter ):
+						new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - chapters_offset_index ).zfill( 2 ) + 'NAME=Chapter ' + str( int( mat.group( 2 ) ) - chapters_offset_index ).zfill( 2 ) + os.linesep
+					else:
+						mat = re.match( r'CHAPTER(\d+)NAME=(.*)$', line )
+						if mat and ( not command_line.start_chapter or int( mat.group( 1 ) ) >= command_line.start_chapter ) and ( not command_line.end_chapter or int( mat.group( 1 ) ) <= command_line.end_chapter ):
+							new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - chapters_offset_index ).zfill( 2 ) + 'NAME=' + mat.group( 2 )
 			chapters = new_chapters
 		chapters_path = os.path.join( work_dir.name, 'chapters' )
 		with open( chapters_path, 'w' ) as chapters_file:
