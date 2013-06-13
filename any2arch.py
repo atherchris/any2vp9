@@ -229,7 +229,7 @@ elif audio_codec_mat.group( 1 ) == 'ffflac' and in_ismatroska and not command_li
 
 	print( 'Encoding audio ...' )
 	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	subprocess.check_call( [ 'oggenc', '--discard-comments', '-o', enc_audio_path, flac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	subprocess.check_call( [ 'oggenc', '--ignorelength', '--discard-comments', '-o', enc_audio_path, flac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 elif audio_codec_mat.group( 1 ) == 'ffaac' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
 	print( 'Extracting AAC audio ...' )
 	aac_audio_path = os.path.join( work_dir.name, 'audio.m4a' )
@@ -241,7 +241,7 @@ elif audio_codec_mat.group( 1 ) == 'ffaac' and in_ismatroska and not command_lin
 
 	print( 'Encoding audio ...' )
 	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	subprocess.check_call( [ 'oggenc', '-o', enc_audio_path, dec_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	subprocess.check_call( [ 'oggenc', '--ignorelength', '-o', enc_audio_path, dec_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 else:
 	print( 'Decoding audio ...' )
 	dec_audio_path = os.path.join( work_dir.name, 'audio.wav' )
@@ -249,7 +249,7 @@ else:
 
 	print( 'Encoding audio ...' )
 	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	subprocess.check_call( [ 'oggenc', '-o', enc_audio_path, dec_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	subprocess.check_call( [ 'oggenc', '--ignorelength', '-o', enc_audio_path, dec_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 # Compute output video format
 if command_line.scale:
