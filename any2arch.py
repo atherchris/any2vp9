@@ -142,7 +142,7 @@ if not command_line.no_chapters:
 
 	if haschapters:
 		if command_line.start_chapter or command_line.end_chapter:
-			new_chapters = ''
+			new_chapters = str()
 			if command_line.start_chapter:
 				chapters_offset_index = command_line.start_chapter - 1
 				mat = re.search( r'^CHAPTER' + str( command_line.start_chapter ).zfill( 2 ) + r'=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$', chapters, re.M )
@@ -287,7 +287,7 @@ if command_line.ivtc:
 elif command_line.rate:
 	ofps = [ '-ofps', '/'.join( map( str, command_line.rate ) ) ]
 else:
-	ofps = []
+	ofps = list()
 if command_line.deinterlace:
 	filters += 'yadif=1,'
 if command_line.crop:
