@@ -50,7 +50,7 @@ command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
 command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', help='indicate that the soure is a DVD' )
 command_line_disc_mutex_group.add_argument( '-B', '--bluray', action='store_true', help='indicate that the soure is a Blu-ray' )
-command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='set disc title number', metavar='INT' )
+command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='set disc title number (default: 1)', metavar='INT' )
 command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='force input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
 command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='force input frame rate (required for --bluray and progressive --dvd)', metavar=( 'N', 'D' ) )
 
