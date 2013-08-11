@@ -221,9 +221,9 @@ if in_ismatroska and mkvmerge_probe_output.count( ' audio ' ) > 1:
 	print( 'WARNING: Source has multiple audio tracks!' )
 if audio_codec_mat.group( 1 ) == 'ffvorbis' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
 	print( 'Extracting Vorbis audio ...' )
-	ogg_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	
-	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + ogg_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
+
+	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + enc_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 elif audio_codec_mat.group( 1 ) == 'ffflac' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
 	print( 'Extracting FLAC audio ...' )
 	flac_audio_path = os.path.join( work_dir.name, 'audio.flac' )
