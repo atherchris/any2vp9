@@ -45,6 +45,7 @@ command_line_parser = argparse.ArgumentParser( description='convert videos to ar
 command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
 command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
 command_line_parser.add_argument( '-H', '--high-quality', action='store_true', help='use higher quality settings' )
+command_line_parser.add_argument( '-b', '--bitrate', type=int, help='set maximum video bitrate (in Kbps)', metavar='INT' )
 
 command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
@@ -305,6 +306,8 @@ if command_line.high_quality:
 else:
 	bitrate = '1700'
 	cq_level = '4'
+if command_line.bitrate:
+	bitrate = str( command_line.bitrate )
 if out_video_dimensions[1] < 480:
 	token_parts = '0'
 elif out_video_dimensions[1] < 720:
