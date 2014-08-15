@@ -1,393 +1,408 @@
 #!/usr/bin/env python3
 
 #
-# Copyright (c) 2013 Christopher Atherton. All rights reserved.
+# Copyright (c) 2014 Christopher Atherton <the8lack8ox@gmail.com>
+# All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# modification, are permitted provided that the following conditions are met:
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
+#    Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+#
+#    Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
-# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
-# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-# SUCH DAMAGE.
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
+
+import glob
+import math
+import os
+import re
+import sys
+import time
 
 import argparse
 import datetime
 import fractions
-import glob
-import math
 import multiprocessing
-import os
-import re
-import subprocess
 import tempfile
-import time
+import subprocess
 
-process_start_time = time.time()
+class AVExtractor:
+	CHAPTERS_TIME_RE = re.compile( r'^CHAPTER(\d+)=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$' )
+	CHAPTERS_TITLE_1_RE = re.compile( r'^CHAPTER(\d+)NAME=Chapter (\d+)$' )
+	CHAPTERS_TITLE_2_RE = re.compile( r'^CHAPTER(\d+)NAME=(.*)$' )
 
-# Parse command line
-command_line_parser = argparse.ArgumentParser( description='convert videos to archive format' )
-command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
-command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
-command_line_parser.add_argument( '-H', '--high-quality', action='store_true', help='use higher quality settings' )
-command_line_parser.add_argument( '-b', '--bitrate', type=int, help='set maximum video bitrate (in Kbps)', metavar='INT' )
+	def __init__( self, path, disc_type=None, disc_title=1, chap_start=None, chap_end=None ):
+		self.path = os.path.abspath( path )
+		self.disc_type = disc_type
 
-command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
-command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
-command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', help='indicate that the soure is a DVD' )
-command_line_disc_mutex_group.add_argument( '-B', '--bluray', action='store_true', help='indicate that the soure is a Blu-ray' )
-command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='set disc title number (default: 1)', metavar='INT' )
-command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='force input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
-command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='force input frame rate (required for --bluray and progressive --dvd)', metavar=( 'N', 'D' ) )
+		if disc_type == 'dvd':
+			self.disc_title = disc_title
+			self.__mplayer_input_args = ( '-dvd-device', path, 'dvd://' + str( disc_title ) )
+		elif disc_type == 'bluray':
+			self.disc_title = disc_title
+			self.__mplayer_input_args = ( '-bluray-device', path, 'bluray://' + str( disc_title ) )
+		else:
+			self.__mplayer_input_args = ( path, )
 
-command_line_chapter_group = command_line_parser.add_argument_group( 'chapters' )
-command_line_chapter_group.add_argument( '-C', '--start-chapter', type=int, help='start at certain chapter', metavar='INT' )
-command_line_chapter_group.add_argument( '-E', '--end-chapter', type=int, help='stop at certain chapter', metavar='INT' )
+		self.chap_start = chap_start
+		self.chap_end = chap_end
+		if chap_start is not None:
+			chap_arg = '-chapter ' + str( chap_start )
+			if chap_end is not None:
+				chap_arg += '-' + str( chap_end )
+			self.__mplayer_input_args = ( chap_arg, ) + self.__mplayer_input_args
+		elif chap_end is not None:
+			self.__mplayer_input_args = ( '-chapter -' + chap_end, ) + self.__mplayer_input_args
 
-command_line_metadata_group = command_line_parser.add_argument_group( 'metadata' )
-command_line_metadata_group.add_argument( '-t', '--title', help='set video title', metavar='STRING' )
-command_line_metadata_group.add_argument( '-V', '--video-language', help='set video language', metavar='LANG' )
-command_line_metadata_group.add_argument( '-A', '--audio-language', help='set audio language', metavar='LANG' )
-command_line_metadata_group.add_argument( '-S', '--subtitles-language', help='set subtitle language', metavar='LANG' )
+		self.__mplayer_probe_out = subprocess.check_output( ( 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '0' ) + self.__mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
 
-command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
-command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='perform deinterlacing' )
-command_line_picture_group.add_argument( '-i', '--ivtc', action='store_true', help='perform inverse telecine' )
-command_line_picture_group.add_argument( '-c', '--crop', nargs=4, type=int, help='crop the picture', metavar=( 'W', 'H', 'X', 'Y' ) )
-command_line_picture_group.add_argument( '-s', '--scale', nargs=2, type=int, help='scale the picture', metavar=( 'W', 'H' ) )
-command_line_picture_aspect_group = command_line_picture_group.add_mutually_exclusive_group()
-command_line_picture_aspect_group.add_argument( '-a', '--display-aspect', nargs=2, type=int, help='set the display aspect of the picture', metavar=( 'W', 'H' ) )
-command_line_picture_aspect_group.add_argument( '-x', '--pixel-aspect', nargs=2, type=int, help='set the display pixel aspect of the picture', metavar=( 'W', 'H' ) )
-command_line_picture_aspect_group.add_argument( '-z', '--display-size', nargs=2, type=int, help='set the display dimensions of the picture', metavar=( 'W', 'H' ) )
+		mat = re.search( r'^VIDEO:  \[?(\w+)\]?  (\d+)x(\d+) .+ (\d+\.\d+) fps', self.__mplayer_probe_out, re.M )
+		self.video_codec = mat.group( 1 )
+		self.video_dimensions = ( int( mat.group( 2 ) ), int( mat.group( 3 ) ) )
 
-command_line_other_group = command_line_parser.add_argument_group( 'other' )
-command_line_other_group.add_argument( '--no-nice', action='store_true', help='do not lower process priority' )
-command_line_other_group.add_argument( '--no-chapters', action='store_true', help='do not include chapters from DVD/Matroska source' )
-command_line_other_group.add_argument( '--no-attachments', action='store_true', help='do not include attachments from Matroska source' )
+		self.video_framerate = float( mat.group( 4 ) )
+		if abs( math.ceil( self.video_framerate ) / 1.001 - self.video_framerate ) / self.video_framerate < 0.00001:
+			self.video_framerate_frac = ( math.ceil( self.video_framerate ) * 1000, 1001 )
+			self.video_framerate = float( self.video_framerate_frac[0] ) / float( self.video_framerate_frac[1] )
+		else:
+			self.video_framerate_frac = fractions.Fraction( self.video_framerate )
+			self.video_framerate_frac = ( self.video_framerate_frac.numerator, self.video_framerate_frac.denominator )
 
-command_line = command_line_parser.parse_args()
+		mat = re.search( r'^AUDIO: (\d+) Hz, (\d+) ch', self.__mplayer_probe_out, re.M )
+		self.audio_samplerate = int( mat.group( 1 ) )
+		self.audio_channels = int( mat.group( 2 ) )
 
-# Verify command line sanity
-if command_line.bluray:
-	if not command_line.size:
-		print( 'ERROR: You must manually input the size of the input for Blu-ray sources!' )
-		exit( 1 )
-	if not command_line.rate:
-		print( 'ERROR: You must manually input the frame rate of the input for Blu-ray sources!' )
-		exit( 1 )
+		mat = re.search( r'^Selected audio codec: \[(\w+)\]', self.__mplayer_probe_out, re.M )
+		self.audio_codec = mat.group( 1 )
 
-# Reduce priority
-if not command_line.no_nice:
-	os.nice( 10 )
+		self.is_matroska = os.path.splitext( path )[1].upper() == '.MKV'
+		if self.is_matroska:
+			self.__mkvmerge_probe_out = subprocess.check_output( ( 'mkvmerge', '--identify', path ), stderr=subprocess.DEVNULL ).decode()
 
-# Begin processing
-print( 'Processing ' + os.path.basename( command_line.input ) + ' ...' )
+	def extract_chapters( self, filename ):
+		if self.is_matroska:
+			chapters = subprocess.check_output( ( 'mkvextract', 'chapters', self.path, '--simple' ), stderr=subprocess.DEVNULL ).decode()
+		elif self.disc_type == 'dvd':
+			chapters = subprocess.check_output( ( 'dvdxchap', '--title', str( self.disc_title ), self.path ), stderr=subprocess.DEVNULL ).decode()
+		else:
+			return False
 
-# Generate MPlayer input arguments
-if command_line.dvd:
-	mplayer_input_args = [ '-dvd-device', command_line.input, 'dvd://' + str( command_line.disc_title ) ]
-elif command_line.bluray:
-	mplayer_input_args = [ '-bluray-device', command_line.input, 'bluray://' + str( command_line.disc_title ) ]
-else:
-	mplayer_input_args = [ command_line.input ]
-if command_line.start_chapter:
-	mplayer_input_args.append( '-chapter' )
-	if command_line.end_chapter:
-		mplayer_input_args.append( str( command_line.start_chapter ) + '-' + str( command_line.end_chapter ) )
-	else:
-		mplayer_input_args.append( str( command_line.start_chapter ) )
-elif command_line.end_chapter:
-	mplayer_input_args.append( '-chapter' )
-	mplayer_input_args.append( '-' + str( command_line.end_chapter ) )
-
-# Probe input file
-mplayer_probe_output = subprocess.check_output( [ 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '0' ] + mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
-video_spec_mat = re.search( r'^VIDEO:  \[?(\w+)\]?  (\d+)x(\d+) .+ (\d+\.\d+) fps', mplayer_probe_output, re.M )
-audio_spec_mat = re.search( r'^AUDIO: (\d+) Hz, (\d+) ch', mplayer_probe_output, re.M )
-audio_codec_mat = re.search( r'^Selected audio codec: \[(\w+)\]', mplayer_probe_output, re.M )
-
-in_ismatroska = os.path.splitext( command_line.input )[1].lower() == '.mkv'
-if in_ismatroska:
-	mkvmerge_probe_output = subprocess.check_output( [ 'mkvmerge', '-i', command_line.input ], stderr=subprocess.DEVNULL ).decode()
-
-# Create work directory
-work_dir = tempfile.TemporaryDirectory( prefix='any2arch-' )
-print( 'Created work directory: ' + work_dir.name + ' ...' )
-
-# Extract chapters
-if not command_line.no_chapters:
-	if in_ismatroska:
-		haschapters = mkvmerge_probe_output.find( 'Chapters: ' ) != -1
-		if haschapters:
-			print( 'Extracting chapters ...' )
-			chapters = subprocess.check_output( [ 'mkvextract', 'chapters', command_line.input, '-s' ], stderr=subprocess.DEVNULL ).decode()
-	elif command_line.dvd:
-		haschapters = True
-		print( 'Extracting chapters ...' )
-		chapters = subprocess.check_output( [ 'dvdxchap', '-t', str( command_line.disc_title ), command_line.input ], stderr=subprocess.DEVNULL ).decode()
-	else:
-		haschapters = False
-
-	if haschapters:
-		if command_line.start_chapter or command_line.end_chapter:
-			new_chapters = str()
-			if command_line.start_chapter:
-				chapters_offset_index = command_line.start_chapter - 1
-				mat = re.search( r'^CHAPTER' + str( command_line.start_chapter ).zfill( 2 ) + r'=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$', chapters, re.M )
-				if not mat:
-					print( 'ERROR: Start chapter could not be found!' )
-					exit( 1 )
-				chapters_offset_time = datetime.timedelta( hours=int( mat.group( 1 ) ), minutes=int( mat.group( 2 ) ), seconds=int( mat.group( 3 ) ), milliseconds=int( mat.group( 4 ) ) )
+		new_chapters = str()
+		if self.chap_start is not None or self.chap_end is not None:
+			if self.chap_start is not None:
+				offset_index = self.chap_start - 1
+				mat = re.search( r'^CHAPTER' + str( self.chap_start ).zfill( 2 ) + r'=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$', chapters, re.M )
+				if mat is None:
+					raise Exception( 'Start chapter could not be found!' )
+				offset_time = datetime.timedelta( hours=int( mat.group( 1 ) ), minutes=int( mat.group( 2 ) ), seconds=int( mat.group( 3 ) ), milliseconds=int( mat.group( 4 ) ) )
 			else:
-				chapters_offset_index = 0
-				chapters_offset_time = datetime.timedelta()
-			for line in chapters.splitlines():
-				mat = re.match( r'^CHAPTER(\d+)=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$', line )
-				if mat and ( not command_line.start_chapter or int( mat.group( 1 ) ) >= command_line.start_chapter ) and ( not command_line.end_chapter or int( mat.group( 1 ) ) <= command_line.end_chapter ):
-					new_time = datetime.timedelta( hours=int( mat.group( 2 ) ), minutes=int( mat.group( 3 ) ), seconds=int( mat.group( 4 ) ), milliseconds=int( mat.group( 5 ) ) ) - chapters_offset_time
-					new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - chapters_offset_index ).zfill( 2 ) + '='
-					new_time_hours = math.floor( new_time.total_seconds() / 3600 )
-					new_chapters += str( new_time_hours ).zfill( 2 ) + ':'
-					new_time_minutes = math.floor( ( new_time.total_seconds() - new_time_hours * 3600 ) / 60 )
-					new_chapters += str( new_time_minutes ).zfill( 2 ) + ':'
-					new_time_seconds = math.floor( new_time.total_seconds() - new_time_hours * 3600 - new_time_minutes * 60 )
-					new_chapters += str( new_time_seconds ).zfill( 2 ) + '.'
-					new_time_milliseconds = round( ( new_time.total_seconds() - new_time_hours * 3600 - new_time_minutes * 60 - new_time_seconds ) * 1000 )
-					new_chapters += str( new_time_milliseconds ).zfill( 2 ) + os.linesep
+				offset_index = 0
+				offset_time = datetime.timedelta()
+		else:
+			offset_index = 0
+			offset_time = datetime.timedelta()
+		for line in chapters.splitlines():
+			mat = self.CHAPTERS_TIME_RE.match( line )
+			if mat is not None and ( self.chap_start is None or int( mat.group( 1 ) ) >= self.chap_start ) and ( self.chap_end is None or int( mat.group( 1 ) ) <= self.chap_end ):
+				new_time = datetime.timedelta( hours=int( mat.group( 2 ) ), minutes=int( mat.group( 3 ) ), seconds=int( mat.group( 4 ) ), milliseconds=int( mat.group( 5 ) ) ) - offset_time
+				new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - offset_index ).zfill( 2 ) + '=' + str( new_time.seconds // 3600 ).zfill( 2 ) + ':' + str( new_time.seconds // 60 % 3600 ).zfill( 2 ) + ':' + str( new_time.seconds % 60 ).zfill( 2 ) + '.' + str( new_time.microseconds // 1000 ).zfill( 3 ) + '\n'
+			else:
+				mat = self.CHAPTERS_TITLE_1_RE.match( line )
+				if mat is not None and ( self.chap_start is None or int( mat.group( 1 ) ) >= self.chap_start ) and ( self.chap_end is None or int( mat.group( 1 ) ) <= self.chap_end ):
+					new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - offset_index ).zfill( 2 ) + 'NAME=Chapter ' + str( int( mat.group( 2 ) ) - offset_index ).zfill( 2 ) + '\n'
 				else:
-					mat = re.match( r'CHAPTER(\d+)NAME=Chapter (\d+)$', line )
-					if mat and ( not command_line.start_chapter or int( mat.group( 1 ) ) >= command_line.start_chapter ) and ( not command_line.end_chapter or int( mat.group( 1 ) ) <= command_line.end_chapter ):
-						new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - chapters_offset_index ).zfill( 2 ) + 'NAME=Chapter ' + str( int( mat.group( 2 ) ) - chapters_offset_index ).zfill( 2 ) + os.linesep
-					else:
-						mat = re.match( r'CHAPTER(\d+)NAME=(.*)$', line )
-						if mat and ( not command_line.start_chapter or int( mat.group( 1 ) ) >= command_line.start_chapter ) and ( not command_line.end_chapter or int( mat.group( 1 ) ) <= command_line.end_chapter ):
-							new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - chapters_offset_index ).zfill( 2 ) + 'NAME=' + mat.group( 2 )
-			chapters = new_chapters
-		chapters_path = os.path.join( work_dir.name, 'chapters' )
-		with open( chapters_path, 'w' ) as chapters_file:
-			chapters_file.write( chapters )
-	elif command_line.start_chapter or command_line.end_chapter:
-		print( 'ERROR: No chapters available for --start-chapter or --end-chapter!' )
-		exit( 1 )
-else:
-	haschapters = False
+					mat = self.CHAPTERS_TITLE_2_RE.match( line )
+					if mat is not None and ( self.chap_start is None or int( mat.group( 1 ) ) >= self.chap_start ) and ( self.chap_end is None or int( mat.group( 1 ) ) <= self.chap_end ):
+						new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - offset_index ).zfill( 2 ) + 'NAME=' + mat.group( 2 ) + '\n'
 
-# Extract attachments
-if not command_line.no_attachments and in_ismatroska:
-	attachmentcnt = mkvmerge_probe_output.count( 'Attachment ID ' )
-	if attachmentcnt > 0:
-		print( 'Extracting ' + str( attachmentcnt ) + ' attachment(s) ...' )
-		attachments_path = os.path.join( work_dir.name, 'attachments' )
-		in_path = os.path.abspath( command_line.input )
-		cwd = os.getcwd()
-		os.mkdir( attachments_path )
-		os.chdir( attachments_path )
-		subprocess.check_call( [ 'mkvextract', 'attachments', in_path ] + list( map( str, range( 1, attachmentcnt + 1 ) ) ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-		os.chdir( cwd )
-else:
-	attachmentcnt = 0
+		with open( filename, 'w' ) as f:
+			f.write( new_chapters )
 
-# Extract subtitles
-if in_ismatroska:
-	subtitle_mat = re.search( r'^Track ID (\d+): subtitles', mkvmerge_probe_output, re.M )
-	if subtitle_mat is not None:
-		hassubtitles = True
-		if mkvmerge_probe_output.count( ' subtitles ' ) > 1:
-			print( 'WARNING: Source has multiple subtitle tracks!' )
-		print( 'Extracting subtitles ...' )
-		subtitles_path = os.path.join( work_dir.name, 'subtitles' )
-		subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, subtitle_mat.group( 1 ) + ':' + subtitles_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		return True
+
+	def extract_attachments( self, directory ):
+		if self.is_matroska:
+			cnt = self.__mkvmerge_probe_out.count( 'Attachment ID ' )
+			if cnt > 0:
+				os.makedirs( directory, exist_ok=True )
+				cwd = os.getcwd()
+				os.chdir( directory )
+				subprocess.check_call( ( 'mkvextract', 'attachments', self.path ) + tuple( map( str, range( 1, cnt + 1 ) ) ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+				os.chdir( cwd )
+			return cnt
+		else:
+			return 0
+
+	def extract_subtitles( self, filename ):
+		if self.is_matroska:
+			mat = re.search( r'^Track ID (\d+): subtitles', self.__mkvmerge_probe_out, re.M )
+			if mat is not None:
+				subprocess.check_call( ( 'mkvextract', 'tracks', self.path, mat.group( 1 ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+				return True
+			else:
+				return False
+		else:
+			return False
+
+	def extract_audio( self, filename ):
+		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffvorbis':
+			# Matroska with Vorbis audio
+			suffix = '.ogg'
+			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename + suffix ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		elif self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffflac':
+			# Matroska with FLAC audio
+			suffix = '.flac'
+			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename + suffix ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		elif self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffaac':
+			# Matroska with AAC audio
+			suffix = '.wav'
+			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename + '.m4a' ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+			subprocess.check_call( ( 'faad', '-b', '4', '-o', filename + suffix, filename + '.m4a' ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		else:
+			# Anything else
+			suffix = '.wav'
+			subprocess.check_call( ( 'mplayer', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=' + filename + suffix ) + self.__mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		return filename + suffix
+
+	def extract_video( self, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
+		filters = 'format=i420,'
+		if ivtc:
+			filters += 'pullup,softskip,'
+			ofps = ( '-ofps', '24000/1001' )
+		elif force_rate is not None:
+			ofps = ( '-ofps', '/'.join( map( str, force_rate ) ) )
+		else:
+			ofps = tuple()
+		if deint:
+			filters += 'yadif=1,'
+		if crop is not None:
+			filters += 'crop=' + ':'.join( map( str, crop ) ) + ','
+		if scale is not None:
+			filters += 'scale=' + ':'.join( map( str, scale ) ) + ','
+		filters += 'hqdn3d,harddup'
+
+		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-nosound', '-nosub', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
+
+def encode_vorbis_audio( in_file, out_file ):
+	subprocess.check_call( ( 'oggenc', '--ignore-length', '--discard-comments', '-o', out_file, in_file ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+
+def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
+	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=1600', '--min-q=0', '--max-q=24', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=4', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	extract_proc.stdout.close()
+	if extract_proc.wait():
+		raise Exception( 'Error occurred in decoding process!' )
+	if enc_proc.wait():
+		raise Exception( 'Error occurred in encoding process!' )
+
+def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate ):
+	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=1600', '--min-q=0', '--max-q=24', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=4', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	extract_proc.stdout.close()
+	if extract_proc.wait():
+		raise Exception( 'Error occurred in decoding process!' )
+	if enc_proc.wait():
+		raise Exception( 'Error occurred in encoding process!' )
+
+def mux_matroska_mkv( out_file, title, chapters, attachments, vid_file, vid_lang, vid_aspect, vid_pixaspect, vid_displaysize, aud_file, aud_lang, sub_file, sub_lang ):
+	cmd = ( 'mkvmerge', )
+	if title is not None:
+		cmd += ( '--title', title )
+	if chapters is not None:
+		cmd += ( '--chapters', chapters )
+	if attachments is not None:
+		for i in sorted( glob.glob( os.path.join( attachments, '*' ) ) ):
+			cmd += ( '--attach-file', i )
+	cmd += ( '--output', out_file )
+	if vid_lang is not None:
+		cmd += ( '--language', '0:' + vid_lang )
+	if vid_aspect is not None:
+		cmd += ( '--aspect-ratio', '0:' + str( vid_aspect[0] ) + '/' + str( vid_aspect[1] ) )
+	if vid_pixaspect is not None:
+		cmd += ( '--aspect-ratio-factor', '0:' + str( vid_pixaspect[0] ) + '/' + str( vid_pixaspect[1] ) )
+	if vid_displaysize is not None:
+		cmd += ( '--display-dimensions', '0:' + str( vid_displaysize[0] ) + 'x' + str( vid_displaysize[1] ) )
+	cmd += ( vid_file, )
+	if aud_lang is not None:
+		cmd += ( '--language', '0:' + aud_lang )
+	cmd += ( aud_file, )
+	if sub_lang is not None:
+		cmd += ( '--language', '0:' + sub_lang )
+	if sub_file is not None:
+		cmd += ( sub_file, )
+	subprocess.check_call( cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+
+def main( argv=None ):
+	process_start_time = time.time()
+
+	# Parse command line
+	command_line_parser = argparse.ArgumentParser( description='convert videos to archive format' )
+	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
+	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
+	command_line_parser.add_argument( '-H', '--high-quality', action='store_true', help='use higher quality settings' )
+	command_line_parser.add_argument( '-b', '--bitrate', type=int, help='set maximum video bitrate (in Kbps)', metavar='INT' )
+
+	command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
+	command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
+	command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', help='indicate that the soure is a DVD' )
+	command_line_disc_mutex_group.add_argument( '-B', '--bluray', action='store_true', help='indicate that the soure is a Blu-ray' )
+	command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='set disc title number (default: 1)', metavar='INT' )
+	command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='force input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
+	command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='force input frame rate (required for --bluray and progressive --dvd)', metavar=( 'N', 'D' ) )
+
+	command_line_chapter_group = command_line_parser.add_argument_group( 'chapters' )
+	command_line_chapter_group.add_argument( '-C', '--start-chapter', type=int, help='start at certain chapter', metavar='INT' )
+	command_line_chapter_group.add_argument( '-E', '--end-chapter', type=int, help='stop at certain chapter', metavar='INT' )
+
+	command_line_metadata_group = command_line_parser.add_argument_group( 'metadata' )
+	command_line_metadata_group.add_argument( '-t', '--title', help='set video title', metavar='STRING' )
+	command_line_metadata_group.add_argument( '-V', '--video-language', help='set video language', metavar='LANG' )
+	command_line_metadata_group.add_argument( '-A', '--audio-language', help='set audio language', metavar='LANG' )
+	command_line_metadata_group.add_argument( '-S', '--subtitles-language', help='set subtitle language', metavar='LANG' )
+
+	command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
+	command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='perform deinterlacing' )
+	command_line_picture_group.add_argument( '-i', '--ivtc', action='store_true', help='perform inverse telecine' )
+	command_line_picture_group.add_argument( '-c', '--crop', nargs=4, type=int, help='crop the picture', metavar=( 'W', 'H', 'X', 'Y' ) )
+	command_line_picture_group.add_argument( '-s', '--scale', nargs=2, type=int, help='scale the picture', metavar=( 'W', 'H' ) )
+	command_line_picture_aspect_group = command_line_picture_group.add_mutually_exclusive_group()
+	command_line_picture_aspect_group.add_argument( '-a', '--display-aspect', nargs=2, type=int, help='set the display aspect of the picture', metavar=( 'W', 'H' ) )
+	command_line_picture_aspect_group.add_argument( '-x', '--pixel-aspect', nargs=2, type=int, help='set the display pixel aspect of the picture', metavar=( 'W', 'H' ) )
+	command_line_picture_aspect_group.add_argument( '-z', '--display-size', nargs=2, type=int, help='set the display dimensions of the picture', metavar=( 'W', 'H' ) )
+
+	command_line_other_group = command_line_parser.add_argument_group( 'other' )
+	command_line_other_group.add_argument( '--no-nice', action='store_true', help='do not lower process priority' )
+	command_line_other_group.add_argument( '--no-chapters', action='store_true', help='do not include chapters from DVD/Matroska source' )
+	command_line_other_group.add_argument( '--no-subtitles', action='store_true', help='do not include subtitles from DVD/Matroska source' )
+	command_line_other_group.add_argument( '--no-attachments', action='store_true', help='do not include attachments from Matroska source' )
+
+	if argv is None:
+		command_line = command_line_parser.parse_args()
 	else:
-		hassubtitles = False
-else:
-	hassubtitles = False
+		command_line = command_line_parser.parse_args( argv )
 
-# Decode/extract/encode audio
-if in_ismatroska and mkvmerge_probe_output.count( ' audio ' ) > 1:
-	print( 'WARNING: Source has multiple audio tracks!' )
-if audio_codec_mat.group( 1 ) == 'ffvorbis' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
-	print( 'Extracting Vorbis audio ...' )
-	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
+	# Verify command line sanity
+	if command_line.bluray:
+		if not command_line.size:
+			print( 'ERROR: You must manually input the size of the input for Blu-ray sources!' )
+			return 1
+		if not command_line.rate:
+			print( 'ERROR: You must manually input the frame rate of the input for Blu-ray sources!' )
+			return 1
 
-	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + enc_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-elif audio_codec_mat.group( 1 ) == 'ffflac' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
-	print( 'Extracting FLAC audio ...' )
-	flac_audio_path = os.path.join( work_dir.name, 'audio.flac' )
-	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + flac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	# Reduce priority
+	if not command_line.no_nice:
+		os.nice( 10 )
 
-	print( 'Encoding audio ...' )
-	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	subprocess.check_call( [ 'oggenc', '--ignorelength', '--discard-comments', '-o', enc_audio_path, flac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-elif audio_codec_mat.group( 1 ) == 'ffaac' and in_ismatroska and not command_line.start_chapter and not command_line.end_chapter:
-	print( 'Extracting AAC audio ...' )
-	aac_audio_path = os.path.join( work_dir.name, 'audio.m4a' )
-	subprocess.check_call( [ 'mkvextract', 'tracks', command_line.input, re.search( r'^Track ID (\d+): audio \((.+)\)', mkvmerge_probe_output, re.M ).group( 1 ) + ':' + aac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	# Process
+	print( 'Processing', os.path.basename( command_line.input ), '...' )
 
-	print( 'Decoding AAC audio ...' )
-	dec_audio_path = os.path.join( work_dir.name, 'audio.wav' )
-	subprocess.check_call( [ 'faad', '-b', '4', '-o', dec_audio_path, aac_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-
-	print( 'Encoding audio ...' )
-	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	subprocess.check_call( [ 'oggenc', '--ignorelength', '-o', enc_audio_path, dec_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-else:
-	print( 'Decoding audio ...' )
-	dec_audio_path = os.path.join( work_dir.name, 'audio.wav' )
-	subprocess.check_call( [ 'mplayer', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', audio_spec_mat.group( 2 ), '-ao', 'pcm:fast:file=' + dec_audio_path ] + mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-
-	print( 'Encoding audio ...' )
-	enc_audio_path = os.path.join( work_dir.name, 'audio.ogg' )
-	subprocess.check_call( [ 'oggenc', '--ignorelength', '-o', enc_audio_path, dec_audio_path ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-
-# Compute output video format
-if command_line.scale:
-	out_video_dimensions = command_line.scale
-elif command_line.crop:
-	out_video_dimensions = command_line.crop[0:2]
-elif command_line.size:
-	out_video_dimensions = command_line.size
-else:
-	out_video_dimensions = [ int( video_spec_mat.group( 2 ) ), int( video_spec_mat.group( 3 ) ) ]
-if command_line.ivtc:
-	out_video_framerate_frac = [ 24000, 1001 ]
-	out_video_framerate_float = 24000.0 / 1001.0
-elif command_line.rate:
-	out_video_framerate_frac = command_line.rate
-	out_video_framerate_float = float( out_video_framerate_frac[0] ) / float( out_video_framerate_frac[1] )
-else:
-	out_video_framerate_float = float( video_spec_mat.group( 4 ) )
-	if abs( math.ceil( out_video_framerate_float ) / 1.001 - out_video_framerate_float ) / out_video_framerate_float < 0.00001:
-		out_video_framerate_frac = [ math.ceil( out_video_framerate_float ) * 1000, 1001 ]
-		out_video_framerate_float = float( out_video_framerate_frac[0] ) / float( out_video_framerate_frac[1] )
+	if command_line.dvd:
+		disc_type = 'dvd'
+	elif command_line.bluray:
+		disc_type = 'bluray'
 	else:
-		out_video_framerate_frac = fractions.Fraction( out_video_framerate_float )
-		out_video_framerate_frac = [ out_video_framerate_frac.numerator, out_video_framerate_frac.denominator ]
-if command_line.deinterlace and not command_line.ivtc:
-	out_video_framerate_frac = fractions.Fraction( 2*out_video_framerate_frac[0], out_video_framerate_frac[1] )
-	out_video_framerate_frac = [ out_video_framerate_frac.numerator, out_video_framerate_frac.denominator ]
-	out_video_framerate_float = float( out_video_framerate_frac[0] ) / float( out_video_framerate_frac[1] )
+		disc_type = None
 
-# Generate decoder settings
-filters = 'format=i420,'
-if command_line.ivtc:
-	filters += 'pullup,softskip,'
-	ofps = [ '-ofps', '24000/1001' ]
-elif command_line.rate:
-	ofps = [ '-ofps', '/'.join( map( str, command_line.rate ) ) ]
-else:
-	ofps = list()
-if command_line.deinterlace:
-	filters += 'yadif=1,'
-if command_line.crop:
-	filters += 'crop=' + ':'.join( map( str, command_line.crop ) ) + ','
-if command_line.scale:
-	filters += 'scale=' + ':'.join( map( str, command_line.scale ) ) + ','
-filters += 'hqdn3d,harddup'
+	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter )
 
-# Generate encoder settings
-if command_line.high_quality:
-	bitrate = '3200'
-	cq_level = '1'
-else:
-	bitrate = '1700'
-	cq_level = '4'
-if command_line.bitrate:
-	bitrate = str( command_line.bitrate )
-if out_video_dimensions[1] < 480:
-	token_parts = '0'
-elif out_video_dimensions[1] < 720:
-	token_parts = '1'
-elif out_video_dimensions[1] < 1080:
-	token_parts = '2'
-else:
-	token_parts = '3'
-kf_max_dist = str( math.floor( out_video_framerate_float * 10.0 ) )
+	with tempfile.TemporaryDirectory( prefix='any2arch-' ) as work_dir:
+		print( 'Created work directory:', work_dir, '...' )
 
-# Encode video - Pass 1
-print( 'Encoding video (pass 1) ...' )
-enc_stats_path = os.path.join( work_dir.name, 'vpx_stats' )
-dec_proc = subprocess.Popen( [ 'mencoder', '-quiet', '-really-quiet', '-nosound', '-nosub', '-sws', '9', '-vf', filters ] + ofps + [ '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ] + mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
-enc_proc = subprocess.Popen( [ 'vpxenc', '--passes=2', '--pass=1', '--fpf=' + enc_stats_path, '--threads=' + str( multiprocessing.cpu_count() ), '--best', '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + bitrate, '--min-q=0', '--max-q=24', '--auto-alt-ref=1', '--token-parts=' + token_parts, '--cq-level=' + cq_level, '--kf-max-dist=' + kf_max_dist, '--i420', '--fps=' + str( out_video_framerate_frac[0] ) + '/' + str( out_video_framerate_frac[1] ), '--width=' + str( out_video_dimensions[0] ), '--height=' + str( out_video_dimensions[1] ), '--ivf', '--output=' + os.devnull, '-' ], stdin=dec_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-dec_proc.stdout.close()
-if dec_proc.wait():
-	print( 'ERROR: Error occurred in decoding process!' )
-	exit( 1 )
-if enc_proc.wait():
-	print( 'ERROR: Error occurred in encoding process!' )
-	exit( 1 )
+		# Chapters
+		if not command_line.no_chapters:
+			chapters_path = os.path.join( work_dir, 'chapters' )
+			has_chapters = extractor.extract_chapters( chapters_path )
+			if has_chapters:
+				print( 'Extracted chapters.' )
+			else:
+				chapters_path = None
+		else:
+			chapters_path = None
 
-# Encode video - Pass 2
-print( 'Encoding video (pass 2) ...' )
-enc_video_path = os.path.join( work_dir.name, 'video.ivf' )
-dec_proc = subprocess.Popen( [ 'mencoder', '-quiet', '-really-quiet', '-nosound', '-nosub', '-sws', '9', '-vf', filters ] + ofps + [ '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ] + mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
-enc_proc = subprocess.Popen( [ 'vpxenc', '--passes=2', '--pass=2', '--fpf=' + enc_stats_path, '--threads=' + str( multiprocessing.cpu_count() ), '--best', '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + bitrate, '--min-q=0', '--max-q=24', '--auto-alt-ref=1', '--token-parts=' + token_parts, '--cq-level=' + cq_level, '--kf-max-dist=' + kf_max_dist, '--i420', '--fps=' + str( out_video_framerate_frac[0] ) + '/' + str( out_video_framerate_frac[1] ), '--width=' + str( out_video_dimensions[0] ), '--height=' + str( out_video_dimensions[1] ), '--ivf', '--output=' + enc_video_path, '-' ], stdin=dec_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-dec_proc.stdout.close()
-if dec_proc.wait():
-	print( 'ERROR: Error occurred in decoding process!' )
-	exit( 1 )
-if enc_proc.wait():
-	print( 'ERROR: Error occurred in encoding process!' )
-	exit( 1 )
+		# Attachments
+		if not command_line.no_attachments:
+			attachments_path = os.path.join( work_dir, 'attachments' )
+			attachments_cnt = extractor.extract_attachments( attachments_path )
+			if attachments_cnt > 0:
+				print( 'Extracted', attachments_cnt, 'attachment(s).' )
+			else:
+				attachments_path = None
+		else:
+			attachments_path = None
 
-# Mux
-print( 'Muxing ...' )
-mux_cmd = [ 'mkvmerge' ]
-if command_line.title:
-	mux_cmd.append( '--title' )
-	mux_cmd.append( command_line.title )
-if haschapters:
-	mux_cmd.append( '--chapters' )
-	mux_cmd.append( chapters_path )
-if attachmentcnt > 0:
-	for i in sorted( glob.glob( os.path.join( attachments_path, '*' ) ) ):
-		mux_cmd.append( '--attach-file' )
-		mux_cmd.append( i )
-mux_cmd.append( '--output' )
-mux_cmd.append( command_line.output )
-if command_line.video_language:
-	mux_cmd.append( '--language' )
-	mux_cmd.append( '0:' + command_line.video_language )
-if command_line.display_aspect:
-	mux_cmd.append( '--aspect-ratio' )
-	mux_cmd.append( '0:' + str( command_line.display_aspect[0] ) + '/' + str( command_line.display_aspect[1] ) )
-if command_line.pixel_aspect:
-	mux_cmd.append( '--aspect-ratio-factor' )
-	mux_cmd.append( '0:' + str( command_line.pixel_aspect[0] ) + '/' + str( command_line.pixel_aspect[1] ) )
-if command_line.display_size:
-	mux_cmd.append( '--display-dimensions' )
-	mux_cmd.append( '0:' + str( command_line.display_size[0] ) + 'x' + str( command_line.display_size[1] ) )
-mux_cmd.append( enc_video_path )
-if command_line.audio_language:
-	mux_cmd.append( '--language' )
-	mux_cmd.append( '0:' + command_line.audio_language )
-mux_cmd.append( enc_audio_path )
-if hassubtitles:
-	if command_line.subtitles_language:
-		mux_cmd.append( '--language' )
-		mux_cmd.append( '0:' + command_line.subtitles_language )
-	mux_cmd.append( subtitles_path )
-subprocess.check_call( mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		# Subtitles
+		if not command_line.no_subtitles:
+			subtitles_path = os.path.join( work_dir, 'subtitles' )
+			has_subtitles = extractor.extract_subtitles( subtitles_path )
+			if has_subtitles:
+				print( 'Extracted subtitles.' )
+			else:
+				subtitles_path = None
+		else:
+			subtitles_path = None
 
-# Clean up
-print( 'Cleaning up ...' )
-work_dir.cleanup()
+		# Audio
+		print( 'Extracting audio ...' )
+		src_audio_path = extractor.extract_audio( os.path.join( work_dir, 'src_audio' ) )
 
-# Done
-if not command_line.bluray:
-	print( 'File size ratio: ' + str( round( float( os.path.getsize( command_line.output ) ) / float( os.path.getsize( command_line.input ) ), 3 ) ) )
-print( 'Done. Process took ' + str( round( time.time() - process_start_time ) ) + ' seconds.' )
+		# Encode audio
+		if os.path.splitext( src_audio_path )[1].upper() != '.OGG':
+			print( 'Encoding audio ...' )
+			dst_audio_path = os.path.join( work_dir, 'dst_audio.ogg' )
+			encode_vorbis_audio( src_audio_path, dst_audio_path )
+		else:
+			dst_audio_path = src_audio_path
+
+		# Final dimension and frame rate calculations
+		if command_line.scale is not None:
+			final_dimensions = command_line.scale
+		elif command_line.crop is not None:
+			final_dimensions = command_line.crop[0:2]
+		else:
+			final_dimensions = extractor.video_dimensions
+		if command_line.ivtc:
+			final_rate = ( 24000, 1001 )
+		elif command_line.rate is not None:
+			final_rate = tuple( command_line.rate )
+		else:
+			final_rate = extractor.video_framerate_frac
+		if command_line.deinterlace:
+			final_rate = ( 2*final_rate[0], final_rate[1] )
+
+		# Transcode video
+		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
+		dst_video_path = os.path.join( work_dir, 'video.ivf' )
+		print( 'Transcoding video (pass 1) ...' )
+		dec_proc = extractor.extract_video( command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
+		encode_vp9_video_pass1( dec_proc, vpx_stats_path, final_dimensions, final_rate )
+		print( 'Transcoding video (pass 2) ...' )
+		dec_proc = extractor.extract_video( command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
+		encode_vp9_video_pass2( dec_proc, dst_video_path, vpx_stats_path, final_dimensions, final_rate )
+
+		# Mux
+		print( 'Multiplexing ...' )
+		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, dst_video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, dst_audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
+
+	# Done
+	process_time = time.time() - process_start_time
+	print( 'Done. Process took', round( process_time // 60 ), 'minutes,', round( process_time % 60 ), 'seconds.', file=sys.stderr )
+	return 0
+
+if __name__ == '__main__':
+	sys.exit( main() )
