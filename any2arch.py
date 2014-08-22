@@ -67,7 +67,7 @@ class AVExtractor:
 				chap_arg += '-' + str( chap_end )
 			self.__mplayer_input_args = ( chap_arg, ) + self.__mplayer_input_args
 		elif chap_end is not None:
-			self.__mplayer_input_args = ( '-chapter -' + chap_end, ) + self.__mplayer_input_args
+			self.__mplayer_input_args = ( '-chapter -' + str( chap_end ), ) + self.__mplayer_input_args
 
 		self.__mplayer_probe_out = subprocess.check_output( ( 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '1' ) + self.__mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
 
