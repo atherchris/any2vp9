@@ -400,8 +400,8 @@ def main( argv=None ):
 		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, dst_video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, dst_audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
 
 	# Done
-	process_time = time.time() - process_start_time
-	print( 'Done. Process took', round( process_time // 60 ), 'minutes,', round( process_time % 60 ), 'seconds.', file=sys.stderr )
+	process_time = round( time.time() - process_start_time )
+	print( 'Done. Process took', process_time // 3600, 'hours,', process_time % 3600 // 60, 'minutes,', process_time % 60, 'seconds.', file=sys.stderr )
 	return 0
 
 if __name__ == '__main__':
