@@ -61,17 +61,18 @@ class AVExtractor:
 
 		self.__mplayer_probe_out = subprocess.check_output( ( 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '1' ) + self.__mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
 
-		mat = re.search( r'^VIDEO:  \[?(\w+)\]?  (\d+)x(\d+) .+ (\d+\.\d+) fps', self.__mplayer_probe_out, re.M )
-		self.video_codec = mat.group( 1 )
-		self.video_dimensions = ( int( mat.group( 2 ) ), int( mat.group( 3 ) ) )
+		if disc_type != 'bluray':
+			mat = re.search( r'^VIDEO:  \[?(\w+)\]?  (\d+)x(\d+) .+ (\d+\.\d+) fps', self.__mplayer_probe_out, re.M )
+			self.video_codec = mat.group( 1 )
+			self.video_dimensions = ( int( mat.group( 2 ) ), int( mat.group( 3 ) ) )
 
-		self.video_framerate = float( mat.group( 4 ) )
-		if abs( math.ceil( self.video_framerate ) / 1.001 - self.video_framerate ) / self.video_framerate < 0.00001:
-			self.video_framerate_frac = ( math.ceil( self.video_framerate ) * 1000, 1001 )
-			self.video_framerate = float( self.video_framerate_frac[0] ) / float( self.video_framerate_frac[1] )
-		else:
-			self.video_framerate_frac = fractions.Fraction( self.video_framerate )
-			self.video_framerate_frac = ( self.video_framerate_frac.numerator, self.video_framerate_frac.denominator )
+			self.video_framerate = float( mat.group( 4 ) )
+			if abs( math.ceil( self.video_framerate ) / 1.001 - self.video_framerate ) / self.video_framerate < 0.00001:
+				self.video_framerate_frac = ( math.ceil( self.video_framerate ) * 1000, 1001 )
+				self.video_framerate = float( self.video_framerate_frac[0] ) / float( self.video_framerate_frac[1] )
+			else:
+				self.video_framerate_frac = fractions.Fraction( self.video_framerate )
+				self.video_framerate_frac = ( self.video_framerate_frac.numerator, self.video_framerate_frac.denominator )
 
 		mat = re.search( r'^AUDIO: (\d+) Hz, (\d+) ch', self.__mplayer_probe_out, re.M )
 		self.audio_samplerate = int( mat.group( 1 ) )
@@ -202,7 +203,7 @@ def encode_vorbis_audio( in_file, out_file ):
 	subprocess.check_call( ( 'oggenc', '--ignorelength', '--discard-comments', '-o', out_file, in_file ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
-	bitrate = ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200
+	bitrate = round( ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200 )
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
 	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
@@ -212,7 +213,7 @@ def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
 		raise Exception( 'Error occurred in encoding process!' )
 
 def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate ):
-	bitrate = ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200
+	bitrate = round( ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200 )
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
 	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
