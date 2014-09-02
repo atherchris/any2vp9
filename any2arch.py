@@ -202,8 +202,9 @@ def encode_vorbis_audio( in_file, out_file ):
 	subprocess.check_call( ( 'oggenc', '--ignorelength', '--discard-comments', '-o', out_file, in_file ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
+	bitrate = ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
-	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=1000', '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
 	if extract_proc.wait():
 		raise Exception( 'Error occurred in decoding process!' )
@@ -211,8 +212,9 @@ def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
 		raise Exception( 'Error occurred in encoding process!' )
 
 def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate ):
+	bitrate = ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
-	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=1000', '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
 	if extract_proc.wait():
 		raise Exception( 'Error occurred in decoding process!' )
@@ -254,8 +256,6 @@ def main( argv=None ):
 	command_line_parser = argparse.ArgumentParser( description='convert videos to archive format' )
 	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
 	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
-	command_line_parser.add_argument( '-H', '--high-quality', action='store_true', help='use higher quality settings' )
-	command_line_parser.add_argument( '-b', '--bitrate', type=int, help='set maximum video bitrate (in Kbps)', metavar='INT' )
 
 	command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 	command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
