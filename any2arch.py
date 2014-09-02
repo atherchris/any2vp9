@@ -298,10 +298,10 @@ def main( argv=None ):
 
 	# Verify command line sanity
 	if command_line.bluray:
-		if not command_line.size:
+		if command_line.size is None:
 			print( 'ERROR: You must manually input the size of the input for Blu-ray sources!' )
 			return 1
-		if not command_line.rate:
+		if command_line.rate is None:
 			print( 'ERROR: You must manually input the frame rate of the input for Blu-ray sources!' )
 			return 1
 
@@ -374,6 +374,8 @@ def main( argv=None ):
 			final_dimensions = command_line.scale
 		elif command_line.crop is not None:
 			final_dimensions = command_line.crop[0:2]
+		elif command_line.size is not None:
+			final_dimensions = command_line.size
 		else:
 			final_dimensions = extractor.video_dimensions
 		if command_line.ivtc:
