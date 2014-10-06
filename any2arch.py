@@ -46,18 +46,25 @@ class AVExtractor:
 	CHAPTERS_TITLE_1_RE = re.compile( r'^CHAPTER(\d+)NAME=Chapter (\d+)$' )
 	CHAPTERS_TITLE_2_RE = re.compile( r'^CHAPTER(\d+)NAME=(.*)$' )
 
-	def __init__( self, path, disc_type=None, disc_title=1, chap_start=None, chap_end=None ):
+	def __init__( self, path, disc_type=None, disc_title=1, chap_start=None, chap_end=None, maid=None, msid=None ):
 		self.path = os.path.abspath( path )
 		self.disc_type = disc_type
 
+		self.__mplayer_input_args = ( )
+
+		if maid is not None:
+			self.__mplayer_input_args += ( '-aid', str( maid ) )
+		if msid is not None:
+			self.__mplayer_input_args += ( '-sid', str( msid ) )
+
 		if disc_type == 'dvd':
 			self.disc_title = disc_title
-			self.__mplayer_input_args = ( '-dvd-device', path, 'dvd://' + str( disc_title ) )
+			self.__mplayer_input_args += ( '-dvd-device', path, 'dvd://' + str( disc_title ) )
 		elif disc_type == 'bluray':
 			self.disc_title = disc_title
-			self.__mplayer_input_args = ( '-bluray-device', path, 'bluray://' + str( disc_title ) )
+			self.__mplayer_input_args += ( '-bluray-device', path, 'bluray://' + str( disc_title ) )
 		else:
-			self.__mplayer_input_args = ( path, )
+			self.__mplayer_input_args += ( path, )
 
 		self.__mplayer_probe_out = subprocess.check_output( ( 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '1' ) + self.__mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
 
@@ -155,10 +162,11 @@ class AVExtractor:
 			if mat is not None:
 				subprocess.check_call( ( 'mkvextract', 'tracks', self.path, mat.group( 1 ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 				return True
-			else:
-				return False
-		else:
-			return False
+		elif self.disc_type == 'dvd':
+			if re.search( r'^number of subtitles on disk: [1-9]', self.__mplayer_probe_out, re.M ) is not None:
+				subprocess.check_call( ( 'mencoder', '-ovc', 'copy', '-o', os.devnull, '-vobsubout', filename ) + self.__mplayer_input_args + ( '-nosound', ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+				return True
+		return False
 
 	def extract_audio( self, filename ):
 		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffvorbis':
@@ -197,13 +205,13 @@ class AVExtractor:
 			filters += 'scale=' + ':'.join( map( str, scale ) ) + ','
 		filters += 'hqdn3d,harddup'
 
-		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-nosound', '-nosub', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
+		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', '-nosub' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
 def encode_vorbis_audio( in_file, out_file ):
 	subprocess.check_call( ( 'oggenc', '--ignorelength', '--discard-comments', '-o', out_file, in_file ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
-	bitrate = round( ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200 )
+	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
 	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
@@ -213,7 +221,7 @@ def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
 		raise Exception( 'Error occurred in encoding process!' )
 
 def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate ):
-	bitrate = round( ( 2000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] + 200 )
+	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
 	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
 	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--threads=' + str( multiprocessing.cpu_count() ), '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
@@ -258,6 +266,10 @@ def main( argv=None ):
 	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
 	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
 
+	command_line_track_group = command_line_parser.add_argument_group( 'track' )
+	command_line_track_group.add_argument( '-u', '--mplayer-aid', type=int, help='set audio track (in MPlayer aid)', metavar='INT' )
+	command_line_track_group.add_argument( '-v', '--mplayer-sid', type=int, help='set subtitle track (in MPlayer sid)', metavar='INT' )
+
 	command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 	command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
 	command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', help='indicate that the soure is a DVD' )
@@ -289,7 +301,7 @@ def main( argv=None ):
 	command_line_other_group = command_line_parser.add_argument_group( 'other' )
 	command_line_other_group.add_argument( '--no-nice', action='store_true', help='do not lower process priority' )
 	command_line_other_group.add_argument( '--no-chapters', action='store_true', help='do not include chapters from DVD/Matroska source' )
-	command_line_other_group.add_argument( '--no-subtitles', action='store_true', help='do not include subtitles from DVD/Matroska source' )
+	command_line_other_group.add_argument( '-N', '--no-subtitles', action='store_true', help='do not include subtitles from DVD/Matroska source' )
 	command_line_other_group.add_argument( '--no-attachments', action='store_true', help='do not include attachments from Matroska source' )
 
 	if argv is None:
@@ -320,7 +332,7 @@ def main( argv=None ):
 	else:
 		disc_type = None
 
-	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter )
+	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter, command_line.mplayer_aid, command_line.mplayer_sid )
 
 	with tempfile.TemporaryDirectory( prefix='any2arch-' ) as work_dir:
 		print( 'Created work directory:', work_dir, '...' )
@@ -353,6 +365,8 @@ def main( argv=None ):
 			has_subtitles = extractor.extract_subtitles( subtitles_path )
 			if has_subtitles:
 				print( 'Extracted subtitles.' )
+				if command_line.dvd:
+					subtitles_path += '.idx'
 			else:
 				subtitles_path = None
 		else:
@@ -404,7 +418,7 @@ def main( argv=None ):
 
 	# Done
 	process_time = round( time.time() - process_start_time )
-	print( 'Done. Process took', process_time // 3600, 'hours,', process_time % 3600 // 60, 'minutes,', process_time % 60, 'seconds.', file=sys.stderr )
+	print( 'Done. Process took', process_time // 3600, 'hours,', process_time % 3600 // 60, 'minutes, and', process_time % 60, 'seconds.', file=sys.stderr )
 	return 0
 
 if __name__ == '__main__':
