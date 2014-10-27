@@ -191,7 +191,10 @@ class AVExtractor:
 	def extract_video( self, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
 		filters = 'format=i420,'
 		if ivtc:
-			filters += 'pullup,softskip,'
+			if crop is None:
+				filters += 'filmdint,'
+			else:
+				filters += 'filmdint=crop=' + ':'.join( map( str, crop ) ) + ','
 			ofps = ( '-ofps', '24000/1001' )
 		elif force_rate is not None:
 			ofps = ( '-ofps', '/'.join( map( str, force_rate ) ) )
@@ -199,7 +202,7 @@ class AVExtractor:
 			ofps = tuple()
 		if deint:
 			filters += 'yadif=1,'
-		if crop is not None:
+		if crop is not None and not ivtc:
 			filters += 'crop=' + ':'.join( map( str, crop ) ) + ','
 		if scale is not None:
 			filters += 'scale=' + ':'.join( map( str, scale ) ) + ','
