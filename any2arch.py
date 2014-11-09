@@ -128,7 +128,7 @@ class AVExtractor:
 			mat = self.CHAPTERS_TIME_RE.match( line )
 			if mat is not None and ( self.chap_start is None or int( mat.group( 1 ) ) >= self.chap_start ) and ( self.chap_end is None or int( mat.group( 1 ) ) <= self.chap_end ):
 				new_time = datetime.timedelta( hours=int( mat.group( 2 ) ), minutes=int( mat.group( 3 ) ), seconds=int( mat.group( 4 ) ), milliseconds=int( mat.group( 5 ) ) ) - offset_time
-				new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - offset_index ).zfill( 2 ) + '=' + str( new_time.seconds // 3600 ).zfill( 2 ) + ':' + str( new_time.seconds // 60 % 3600 ).zfill( 2 ) + ':' + str( new_time.seconds % 60 ).zfill( 2 ) + '.' + str( new_time.microseconds // 1000 ).zfill( 3 ) + '\n'
+				new_chapters += 'CHAPTER' + str( int( mat.group( 1 ) ) - offset_index ).zfill( 2 ) + '=' + str( new_time.seconds // 3600 ).zfill( 2 ) + ':' + str( new_time.seconds // 60 % 60 ).zfill( 2 ) + ':' + str( new_time.seconds % 60 ).zfill( 2 ) + '.' + str( new_time.microseconds // 1000 ).zfill( 3 ) + '\n'
 			else:
 				mat = self.CHAPTERS_TITLE_1_RE.match( line )
 				if mat is not None and ( self.chap_start is None or int( mat.group( 1 ) ) >= self.chap_start ) and ( self.chap_end is None or int( mat.group( 1 ) ) <= self.chap_end ):
@@ -171,30 +171,22 @@ class AVExtractor:
 	def extract_audio( self, filename ):
 		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffvorbis':
 			# Matroska with Vorbis audio
-			suffix = '.ogg'
-			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename + suffix ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+			return None
 		elif self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffflac':
 			# Matroska with FLAC audio
-			suffix = '.flac'
-			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename + suffix ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-		elif self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffaac':
-			# Matroska with AAC audio
-			suffix = '.wav'
-			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename + '.m4a' ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-			subprocess.check_call( ( 'faad', '-b', '4', '-o', filename + suffix, filename + '.m4a' ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+			return subprocess.Popen( ( 'mkvextract', '--redirect-output', '/dev/stderr', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':/dev/stdout' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 		else:
 			# Anything else
-			suffix = '.wav'
-			subprocess.check_call( ( 'mplayer', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=' + filename + suffix ) + self.__mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-		return filename + suffix
+			return subprocess.Popen( ( 'mplayer', '-quiet', '-really-quiet', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=/dev/stdout' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
 	def extract_video( self, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
 		filters = 'format=i420,'
 		if ivtc:
 			if crop is None:
-				filters += 'filmdint,'
+				filters += 'filmdint=fast=0,'
 			else:
-				filters += 'filmdint=crop=' + ':'.join( map( str, crop ) ) + ','
+				filters += 'filmdint=fast=0/crop=' + ':'.join( map( str, crop ) ) + ','
 			ofps = ( '-ofps', '24000/1001' )
 		elif force_rate is not None:
 			ofps = ( '-ofps', '/'.join( map( str, force_rate ) ) )
@@ -210,8 +202,13 @@ class AVExtractor:
 
 		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', '-nosub' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
-def encode_vorbis_audio( in_file, out_file ):
-	subprocess.check_call( ( 'oggenc', '--ignorelength', '--discard-comments', '-o', out_file, in_file ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+def encode_vorbis_audio( extract_proc, out_file ):
+	enc_proc = subprocess.Popen( ( 'oggenc', '--ignorelength', '--discard-comments', '-o', out_file, '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	extract_proc.stdout.close()
+	if extract_proc.wait():
+		raise Exception( 'Error occurred in decoding process!' )
+	if enc_proc.wait():
+		raise Exception( 'Error occurred in encoding process!' )
 
 def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
 	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
@@ -375,17 +372,14 @@ def main( argv=None ):
 		else:
 			subtitles_path = None
 
-		# Audio
-		print( 'Extracting audio ...' )
-		src_audio_path = extractor.extract_audio( os.path.join( work_dir, 'src_audio' ) )
-
-		# Encode audio
-		if os.path.splitext( src_audio_path )[1].upper() != '.OGG':
-			print( 'Encoding audio ...' )
-			dst_audio_path = os.path.join( work_dir, 'dst_audio.ogg' )
-			encode_vorbis_audio( src_audio_path, dst_audio_path )
+		# Transcode audio
+		audio_path = os.path.join( work_dir, 'audio.ogg' )
+		dec_proc = extractor.extract_audio( audio_path )
+		if dec_proc is None:
+			print( 'Extracted audio.' )
 		else:
-			dst_audio_path = src_audio_path
+			print( 'Transcoding audio ...' )
+			encode_vorbis_audio( dec_proc, audio_path )
 
 		# Final dimension and frame rate calculations
 		if command_line.scale is not None:
@@ -417,7 +411,7 @@ def main( argv=None ):
 
 		# Mux
 		print( 'Multiplexing ...' )
-		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, dst_video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, dst_audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
+		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, dst_video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
 
 	# Done
 	process_time = round( time.time() - process_start_time )
