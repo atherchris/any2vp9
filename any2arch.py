@@ -180,7 +180,7 @@ class AVExtractor:
 			# Anything else
 			return subprocess.Popen( ( 'mplayer', '-quiet', '-really-quiet', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=/dev/stdout' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
-	def extract_video( self, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
+	def extract_video( self, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
 		filters = 'format=i420,'
 		if ivtc:
 			if crop is None:
@@ -198,6 +198,8 @@ class AVExtractor:
 			filters += 'crop=' + ':'.join( map( str, crop ) ) + ','
 		if scale is not None:
 			filters += 'scale=' + ':'.join( map( str, scale ) ) + ','
+		if pp:
+			filters += 'pp=ha/va/dr,'
 		filters += 'hqdn3d,harddup'
 
 		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', '-nosub' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
@@ -289,6 +291,7 @@ def main( argv=None ):
 	command_line_metadata_group.add_argument( '-S', '--subtitles-language', help='set subtitle language', metavar='LANG' )
 
 	command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
+	command_line_picture_group.add_argument( '-p', '--post-process', action='store_true', help='perform post-processing' )
 	command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='perform deinterlacing' )
 	command_line_picture_group.add_argument( '-i', '--ivtc', action='store_true', help='perform inverse telecine' )
 	command_line_picture_group.add_argument( '-c', '--crop', nargs=4, type=int, help='crop the picture', metavar=( 'W', 'H', 'X', 'Y' ) )
@@ -378,8 +381,9 @@ def main( argv=None ):
 		if dec_proc is None:
 			print( 'Extracted audio.' )
 		else:
-			print( 'Transcoding audio ...' )
+			print( 'Transcoding audio ...', end=str(), flush=True )
 			encode_vorbis_audio( dec_proc, audio_path )
+			print( ' done.', flush=True )
 
 		# Final dimension and frame rate calculations
 		if command_line.scale is not None:
@@ -398,24 +402,29 @@ def main( argv=None ):
 			final_rate = extractor.video_framerate_frac
 		if command_line.deinterlace:
 			final_rate = ( 2*final_rate[0], final_rate[1] )
+		final_rate_frac = fractions.Fraction( final_rate[0], final_rate[1] )
+		final_rate = ( final_rate_frac.numerator, final_rate_frac.denominator )
 
 		# Transcode video
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
 		dst_video_path = os.path.join( work_dir, 'video.ivf' )
-		print( 'Transcoding video (pass 1) ...' )
-		dec_proc = extractor.extract_video( command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
+		print( 'Transcoding video (pass 1) ...', end=str(), flush=True )
+		dec_proc = extractor.extract_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
 		encode_vp9_video_pass1( dec_proc, vpx_stats_path, final_dimensions, final_rate )
-		print( 'Transcoding video (pass 2) ...' )
-		dec_proc = extractor.extract_video( command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
+		print( ' done.', flush=True )
+		print( 'Transcoding video (pass 2) ...', end=str(), flush=True )
+		dec_proc = extractor.extract_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
 		encode_vp9_video_pass2( dec_proc, dst_video_path, vpx_stats_path, final_dimensions, final_rate )
+		print( ' done.', flush=True )
 
 		# Mux
-		print( 'Multiplexing ...' )
+		print( 'Multiplexing ...', end=str(), flush=True )
 		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, dst_video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
+		print( ' done.', flush=True )
 
 	# Done
 	process_time = round( time.time() - process_start_time )
-	print( 'Done. Process took', process_time // 3600, 'hours,', process_time % 3600 // 60, 'minutes, and', process_time % 60, 'seconds.', file=sys.stderr )
+	print( 'Finished. Process took', process_time // 3600, 'hours,', process_time // 60 % 60, 'minutes, and', process_time % 60, 'seconds.', file=sys.stderr )
 	return 0
 
 if __name__ == '__main__':
