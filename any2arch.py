@@ -66,10 +66,10 @@ class AVExtractor:
 		else:
 			self.__mplayer_input_args += ( path, )
 
-		self.__mplayer_probe_out = subprocess.check_output( ( 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '1' ) + self.__mplayer_input_args, stderr=subprocess.DEVNULL ).decode()
+		mplayer_probe_out = subprocess.check_output( ( 'mplayer', '-nocorrect-pts', '-vo', 'null', '-ac', 'ffmp3,', '-ao', 'null', '-endpos', '1' ) + self.__mplayer_input_args, stderr=subprocess.STDOUT ).decode()
 
 		if disc_type != 'bluray':
-			mat = re.search( r'^VIDEO:  \[?(\w+)\]?  (\d+)x(\d+) .+ (\d+\.\d+) fps', self.__mplayer_probe_out, re.M )
+			mat = re.search( r'^VIDEO:  \[?(\w+)\]?  (\d+)x(\d+) .+ (\d+\.\d+) fps', mplayer_probe_out, re.M )
 			self.video_codec = mat.group( 1 )
 			self.video_dimensions = ( int( mat.group( 2 ) ), int( mat.group( 3 ) ) )
 
@@ -81,11 +81,11 @@ class AVExtractor:
 				self.video_framerate_frac = fractions.Fraction( self.video_framerate )
 				self.video_framerate_frac = ( self.video_framerate_frac.numerator, self.video_framerate_frac.denominator )
 
-		mat = re.search( r'^AUDIO: (\d+) Hz, (\d+) ch', self.__mplayer_probe_out, re.M )
+		mat = re.search( r'^AUDIO: (\d+) Hz, (\d+) ch', mplayer_probe_out, re.M )
 		self.audio_samplerate = int( mat.group( 1 ) )
 		self.audio_channels = int( mat.group( 2 ) )
 
-		mat = re.search( r'^Selected audio codec: \[(\w+)\]', self.__mplayer_probe_out, re.M )
+		mat = re.search( r'^Selected audio codec: \[(\w+)\]', mplayer_probe_out, re.M )
 		self.audio_codec = mat.group( 1 )
 
 		self.chap_start = chap_start
@@ -99,8 +99,37 @@ class AVExtractor:
 			self.__mplayer_input_args += ( '-chapter', '-' + str( chap_end ) )
 
 		self.is_matroska = os.path.splitext( path )[1].upper() == '.MKV'
-		if self.is_matroska:
-			self.__mkvmerge_probe_out = subprocess.check_output( ( 'mkvmerge', '--identify', path ), stderr=subprocess.DEVNULL ).decode()
+		if disc_type == 'dvd':
+			# Chapters
+			self.has_chapters = True
+
+			# Attachments
+			self.attachment_cnt = 0
+
+			# Subtitles
+			if re.search( r'^number of subtitles on disk: [1-9]', mplayer_probe_out, re.M ) is not None:
+				self.has_subtitles = True
+			else:
+				self.has_subtitles = False
+		elif self.is_matroska:
+			mkvmerge_probe_out = subprocess.check_output( ( 'mkvmerge', '--identify', path ), stderr=subprocess.DEVNULL ).decode()
+
+			# Chapters
+			self.has_chapters = 'Chapters: ' in mkvmerge_probe_out
+
+			# Attachments
+			self.attachment_cnt = mkvmerge_probe_out.count( 'Attachment ID ' )
+
+			# Subtitles
+			mat = re.search( r'^Track ID (\d+): subtitles', mkvmerge_probe_out, re.M )
+			if mat is not None:
+				self.has_subtitles = True
+				self.__mkv_subtitle_tracknum = int( mat.group( 1 ) )
+			else:
+				self.has_subtitles = False
+		else:
+			self.attachment_cnt = 0
+			self.has_subtitles = False
 
 	def extract_chapters( self, filename ):
 		if self.is_matroska:
@@ -108,7 +137,7 @@ class AVExtractor:
 		elif self.disc_type == 'dvd':
 			chapters = subprocess.check_output( ( 'dvdxchap', '--title', str( self.disc_title ), self.path ), stderr=subprocess.DEVNULL ).decode()
 		else:
-			return False
+			raise Exception( 'Cannot extract chapters because there are none.' )
 
 		new_chapters = str()
 		if self.chap_start is not None or self.chap_end is not None:
@@ -141,46 +170,36 @@ class AVExtractor:
 		with open( filename, 'w' ) as f:
 			f.write( new_chapters )
 
-		return True
-
 	def extract_attachments( self, directory ):
-		if self.is_matroska:
-			cnt = self.__mkvmerge_probe_out.count( 'Attachment ID ' )
-			if cnt > 0:
-				os.makedirs( directory, exist_ok=True )
-				cwd = os.getcwd()
-				os.chdir( directory )
-				subprocess.check_call( ( 'mkvextract', 'attachments', self.path ) + tuple( map( str, range( 1, cnt + 1 ) ) ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-				os.chdir( cwd )
-			return cnt
-		else:
-			return 0
+		os.mkdir( directory )
+		cwd = os.getcwd()
+		os.chdir( directory )
+		subprocess.check_call( ( 'mkvextract', 'attachments', self.path ) + tuple( map( str, range( 1, self.attachment_cnt + 1 ) ) ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		os.chdir( cwd )
 
 	def extract_subtitles( self, filename ):
-		if self.is_matroska:
-			mat = re.search( r'^Track ID (\d+): subtitles', self.__mkvmerge_probe_out, re.M )
-			if mat is not None:
-				subprocess.check_call( ( 'mkvextract', 'tracks', self.path, mat.group( 1 ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-				return True
-		elif self.disc_type == 'dvd':
-			if re.search( r'^number of subtitles on disk: [1-9]', self.__mplayer_probe_out, re.M ) is not None:
-				subprocess.check_call( ( 'mencoder', '-ovc', 'copy', '-o', os.devnull, '-vobsubout', filename ) + self.__mplayer_input_args + ( '-nosound', ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-				return True
-		return False
+		if self.has_subtitles and self.is_matroska:
+			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, str( self.__mkv_subtitle_tracknum ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		elif self.has_subtitles and self.disc_type == 'dvd':
+			subprocess.check_call( ( 'mencoder', '-ovc', 'copy', '-o', os.devnull, '-vobsubout', filename ) + self.__mplayer_input_args + ( '-nosound', ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+		else:
+			raise Exception( 'Cannot extract subtitles (no subtitles)!' )
 
 	def extract_audio( self, filename ):
 		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffvorbis':
 			# Matroska with Vorbis audio
 			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-			return None
-		elif self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffflac':
+		else:
+			raise Exception( 'Cannot extract audio (audio is not Vorbis).' )
+
+	def decode_audio( self ):
+		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffflac':
 			# Matroska with FLAC audio
 			return subprocess.Popen( ( 'mkvextract', '--redirect-output', '/dev/stderr', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':/dev/stdout' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 		else:
-			# Anything else
 			return subprocess.Popen( ( 'mplayer', '-quiet', '-really-quiet', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=/dev/stdout' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
-	def extract_video( self, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
+	def decode_video( self, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
 		filters = 'format=i420,'
 		if ivtc:
 			if crop is None:
@@ -341,48 +360,43 @@ def main( argv=None ):
 		print( 'Created work directory:', work_dir, '...' )
 
 		# Chapters
-		if not command_line.no_chapters:
+		if extractor.has_chapters and not command_line.no_chapters:
+			print( 'Extracting chapters ...', end=str(), flush=True )
 			chapters_path = os.path.join( work_dir, 'chapters' )
-			has_chapters = extractor.extract_chapters( chapters_path )
-			if has_chapters:
-				print( 'Extracted chapters.' )
-			else:
-				chapters_path = None
+			extractor.extract_chapters( chapters_path )
+			print( ' done.', flush=True )
 		else:
 			chapters_path = None
 
 		# Attachments
-		if not command_line.no_attachments:
+		if extractor.attachment_cnt > 0 and not command_line.no_attachments:
+			print( 'Extracting ' + str( extractor.attachments_cnt ) + ' attachment(s) ...', end=str(), flush=True )
 			attachments_path = os.path.join( work_dir, 'attachments' )
-			attachments_cnt = extractor.extract_attachments( attachments_path )
-			if attachments_cnt > 0:
-				print( 'Extracted', attachments_cnt, 'attachment(s).' )
-			else:
-				attachments_path = None
+			extractor.extract_attachments( attachments_path )
+			print( ' done.', flush=True )
 		else:
 			attachments_path = None
 
 		# Subtitles
-		if not command_line.no_subtitles:
+		if extractor.has_subtitles and not command_line.no_subtitles:
+			print( 'Extracting subtitles ...', end=str(), flush=True )
 			subtitles_path = os.path.join( work_dir, 'subtitles' )
-			has_subtitles = extractor.extract_subtitles( subtitles_path )
-			if has_subtitles:
-				print( 'Extracted subtitles.' )
-				if command_line.dvd:
-					subtitles_path += '.idx'
-			else:
-				subtitles_path = None
+			extractor.extract_subtitles( subtitles_path )
+			if command_line.dvd:
+				subtitles_path += '.idx'
+			print( ' done.', flush=True )
 		else:
 			subtitles_path = None
 
-		# Transcode audio
+		# Audio
 		audio_path = os.path.join( work_dir, 'audio.ogg' )
-		dec_proc = extractor.extract_audio( audio_path )
-		if dec_proc is None:
-			print( 'Extracted audio.' )
+		if extractor.is_matroska and extractor.chap_start is None and extractor.chap_end is None and extractor.audio_codec == 'ffvorbis':
+			print( 'Extracting audio ...', end=str(), flush=True )
+			extractor.extract_audio( audio_path )
+			print( ' done.', flush=True )
 		else:
 			print( 'Transcoding audio ...', end=str(), flush=True )
-			encode_vorbis_audio( dec_proc, audio_path )
+			encode_vorbis_audio( extractor.decode_audio(), audio_path )
 			print( ' done.', flush=True )
 
 		# Final dimension and frame rate calculations
@@ -409,12 +423,10 @@ def main( argv=None ):
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
 		dst_video_path = os.path.join( work_dir, 'video.ivf' )
 		print( 'Transcoding video (pass 1) ...', end=str(), flush=True )
-		dec_proc = extractor.extract_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
-		encode_vp9_video_pass1( dec_proc, vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass1( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 		print( 'Transcoding video (pass 2) ...', end=str(), flush=True )
-		dec_proc = extractor.extract_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate )
-		encode_vp9_video_pass2( dec_proc, dst_video_path, vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass2( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), dst_video_path, vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 
 		# Mux
