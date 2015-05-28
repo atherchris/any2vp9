@@ -128,6 +128,7 @@ class AVExtractor:
 			else:
 				self.has_subtitles = False
 		else:
+			self.has_chapters = False
 			self.attachment_cnt = 0
 			self.has_subtitles = False
 
