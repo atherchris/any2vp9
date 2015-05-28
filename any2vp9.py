@@ -284,7 +284,7 @@ def main( argv=None ):
 	process_start_time = time.time()
 
 	# Parse command line
-	command_line_parser = argparse.ArgumentParser( description='convert videos to archive format' )
+	command_line_parser = argparse.ArgumentParser( description='convert videos to VP9 format' )
 	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
 	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
 
@@ -357,7 +357,7 @@ def main( argv=None ):
 
 	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter, command_line.mplayer_aid, command_line.mplayer_sid )
 
-	with tempfile.TemporaryDirectory( prefix='any2arch-' ) as work_dir:
+	with tempfile.TemporaryDirectory( prefix='any2vp9-' ) as work_dir:
 		print( 'Created work directory:', work_dir, '...' )
 
 		# Chapters
