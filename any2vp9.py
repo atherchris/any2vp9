@@ -40,6 +40,8 @@ import fractions
 import tempfile
 import subprocess
 
+PROGRAM_NAME = 'any2vp9'
+
 class AVExtractor:
 	CHAPTERS_TIME_RE = re.compile( r'^CHAPTER(\d+)=(\d\d):(\d\d):(\d\d)\.(\d\d\d)$' )
 	CHAPTERS_TITLE_1_RE = re.compile( r'^CHAPTER(\d+)NAME=Chapter (\d+)$' )
@@ -356,7 +358,7 @@ def main( argv=None ):
 
 	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter, command_line.mplayer_aid, command_line.mplayer_sid )
 
-	with tempfile.TemporaryDirectory( prefix='any2vp9-' ) as work_dir:
+	with tempfile.TemporaryDirectory( prefix=PROGRAM_NAME+'-' ) as work_dir:
 		print( 'Created work directory:', work_dir, '...' )
 
 		# Chapters
@@ -421,17 +423,17 @@ def main( argv=None ):
 
 		# Transcode video
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
-		dst_video_path = os.path.join( work_dir, 'video.ivf' )
+		video_path = os.path.join( work_dir, 'video.ivf' )
 		print( 'Transcoding video (pass 1) ...', end=str(), flush=True )
 		encode_vp9_video_pass1( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 		print( 'Transcoding video (pass 2) ...', end=str(), flush=True )
-		encode_vp9_video_pass2( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), dst_video_path, vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass2( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), video_path, vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 
 		# Mux
 		print( 'Multiplexing ...', end=str(), flush=True )
-		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, dst_video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
+		mux_matroska_mkv( command_line.output, command_line.title, chapters_path, attachments_path, video_path, command_line.video_language, command_line.display_aspect, command_line.pixel_aspect, command_line.display_size, audio_path, command_line.audio_language, subtitles_path, command_line.subtitles_language )
 		print( ' done.', flush=True )
 
 	# Done
