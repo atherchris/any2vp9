@@ -113,16 +113,16 @@ class AVExtractor:
 			else:
 				self.has_subtitles = False
 		elif self.is_matroska:
-			mkvmerge_probe_out = subprocess.check_output( ( 'mkvmerge', '--identify', path ), stderr=subprocess.DEVNULL ).decode()
+			self.__mkvmerge_probe_out = subprocess.check_output( ( 'mkvmerge', '--identify', path ), stderr=subprocess.DEVNULL ).decode()
 
 			# Chapters
-			self.has_chapters = 'Chapters: ' in mkvmerge_probe_out
+			self.has_chapters = 'Chapters: ' in self.__mkvmerge_probe_out
 
 			# Attachments
-			self.attachment_cnt = mkvmerge_probe_out.count( 'Attachment ID ' )
+			self.attachment_cnt = self.__mkvmerge_probe_out.count( 'Attachment ID ' )
 
 			# Subtitles
-			mat = re.search( r'^Track ID (\d+): subtitles', mkvmerge_probe_out, re.M )
+			mat = re.search( r'^Track ID (\d+): subtitles', self.__mkvmerge_probe_out, re.M )
 			if mat is not None:
 				self.has_subtitles = True
 				self.__mkv_subtitle_tracknum = int( mat.group( 1 ) )
