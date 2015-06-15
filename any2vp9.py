@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 
 #
-# Copyright (c) 2015 Christopher Atherton <the8lack8ox@gmail.com>
+# Copyright (c) 2015, Christopher Atherton <the8lack8ox@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
-#    Redistributions of source code must retain the above copyright notice,
-#    this list of conditions and the following disclaimer.
+# 1. Redistributions of source code must retain the above copyright notice,
+# this list of conditions and the following disclaimer.
 #
-#    Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -201,7 +201,7 @@ class AVExtractor:
 		else:
 			return subprocess.Popen( ( 'mplayer', '-quiet', '-really-quiet', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=/dev/stdout' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
-	def decode_video( self, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
+	def decode_video( self, denoise=False, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
 		filters = 'format=i420,'
 		if ivtc:
 			if crop is None:
@@ -221,7 +221,9 @@ class AVExtractor:
 			filters += 'scale=' + ':'.join( map( str, scale ) ) + ','
 		if pp:
 			filters += 'pp=ha/va/dr,'
-		filters += 'hqdn3d,harddup'
+		if denoise:
+			filters += 'hqdn3d,'
+		filters += 'harddup'
 
 		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', '-nosub' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
@@ -312,6 +314,7 @@ def main( argv=None ):
 	command_line_metadata_group.add_argument( '-S', '--subtitles-language', help='set subtitle language', metavar='LANG' )
 
 	command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
+	command_line_picture_group.add_argument( '-n', '--denoise', action='store_true', help='apply denoise filter' )
 	command_line_picture_group.add_argument( '-p', '--post-process', action='store_true', help='perform post-processing' )
 	command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='perform deinterlacing' )
 	command_line_picture_group.add_argument( '-i', '--ivtc', action='store_true', help='perform inverse telecine' )
@@ -425,10 +428,10 @@ def main( argv=None ):
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
 		video_path = os.path.join( work_dir, 'video.ivf' )
 		print( 'Transcoding video (pass 1) ...', end=str(), flush=True )
-		encode_vp9_video_pass1( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 		print( 'Transcoding video (pass 2) ...', end=str(), flush=True )
-		encode_vp9_video_pass2( extractor.decode_video( command_line.dvd or command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), video_path, vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), video_path, vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 
 		# Mux
