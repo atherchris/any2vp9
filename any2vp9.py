@@ -74,13 +74,11 @@ class AVExtractor:
 			self.video_codec = mat.group( 1 )
 			self.video_dimensions = ( int( mat.group( 2 ) ), int( mat.group( 3 ) ) )
 
-			self.video_framerate = float( mat.group( 4 ) )
-			if abs( math.ceil( self.video_framerate ) / 1.001 - self.video_framerate ) / self.video_framerate < 0.00001:
-				self.video_framerate_frac = ( math.ceil( self.video_framerate ) * 1000, 1001 )
-				self.video_framerate = float( self.video_framerate_frac[0] ) / float( self.video_framerate_frac[1] )
+			video_framerate_float = float( mat.group( 4 ) )
+			if abs( math.ceil( video_framerate_float ) / 1.001 - video_framerate_float ) / video_framerate_float < 0.00001:
+				self.video_framerate = fractions.Fraction( math.ceil( video_framerate_float ) * 1000, 1001 )
 			else:
-				self.video_framerate_frac = fractions.Fraction( self.video_framerate )
-				self.video_framerate_frac = ( self.video_framerate_frac.numerator, self.video_framerate_frac.denominator )
+				self.video_framerate = fractions.Fraction( video_framerate_float )
 
 		mat = re.search( r'^AUDIO: (\d+) Hz, (\d+) ch', mplayer_probe_out, re.M )
 		self.audio_samplerate = int( mat.group( 1 ) )
@@ -108,10 +106,7 @@ class AVExtractor:
 			self.attachment_cnt = 0
 
 			# Subtitles
-			if re.search( r'^number of subtitles on disk: [1-9]', mplayer_probe_out, re.M ) is not None:
-				self.has_subtitles = True
-			else:
-				self.has_subtitles = False
+			self.has_subtitles = re.search( r'^number of subtitles on disk: [1-9]', mplayer_probe_out, re.M ) is not None
 		elif self.is_matroska:
 			self.__mkvmerge_probe_out = subprocess.check_output( ( 'mkvmerge', '--identify', path ), stderr=subprocess.DEVNULL ).decode()
 
@@ -237,8 +232,8 @@ def encode_vorbis_audio( extract_proc, out_file ):
 
 def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
 	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
-	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
-	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	kf_max_dist = math.floor( framerate * 10 )
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate.numerator ) + '/' + str( framerate.denominator ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
 	if extract_proc.wait():
 		raise Exception( 'Error occurred in decoding process!' )
@@ -247,8 +242,8 @@ def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
 
 def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate ):
 	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
-	kf_max_dist = math.floor( float( framerate[0] ) / float( framerate[1] ) * 10.0 )
-	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate[0] ) + '/' + str( framerate[1] ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	kf_max_dist = math.floor( framerate * 10 )
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--i420', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate.numerator ) + '/' + str( framerate.denominator ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
 	if extract_proc.wait():
 		raise Exception( 'Error occurred in decoding process!' )
@@ -414,15 +409,13 @@ def main( argv=None ):
 		else:
 			final_dimensions = extractor.video_dimensions
 		if command_line.ivtc:
-			final_rate = ( 24000, 1001 )
+			final_rate = fractions.Fraction( 24000, 1001 )
 		elif command_line.rate is not None:
-			final_rate = tuple( command_line.rate )
+			final_rate = fractions.Fraction( *command_line.rate )
 		else:
-			final_rate = extractor.video_framerate_frac
+			final_rate = extractor.video_framerate
 		if command_line.deinterlace:
-			final_rate = ( 2*final_rate[0], final_rate[1] )
-		final_rate_frac = fractions.Fraction( final_rate[0], final_rate[1] )
-		final_rate = ( final_rate_frac.numerator, final_rate_frac.denominator )
+			final_rate *= 2
 
 		# Transcode video
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
