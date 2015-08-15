@@ -168,6 +168,7 @@ class AVExtractor:
 			f.write( new_chapters )
 
 	def extract_attachments( self, directory ):
+		assert self.is_matroska
 		os.mkdir( directory )
 		cwd = os.getcwd()
 		os.chdir( directory )
@@ -183,11 +184,11 @@ class AVExtractor:
 			raise Exception( 'Cannot extract subtitles (no subtitles)!' )
 
 	def extract_audio( self, filename ):
-		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffvorbis':
-			# Matroska with Vorbis audio
+		assert self.chap_start is None and self.chap_end is None
+		if self.is_matroska:
 			subprocess.check_call( ( 'mkvextract', 'tracks', self.path, re.search( r'^Track ID (\d+): audio \((.+)\)', self.__mkvmerge_probe_out, re.M ).group( 1 ) + ':' + filename ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 		else:
-			raise Exception( 'Cannot extract audio (audio is not Vorbis).' )
+			subprocess.check_call( ( 'mplayer', '-dumpaudio', '-dumpfile', filename ) + self.__mplayer_input_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 
 	def decode_audio( self ):
 		if self.is_matroska and self.chap_start is None and self.chap_end is None and self.audio_codec == 'ffflac':
@@ -292,8 +293,8 @@ def main( argv=None ):
 
 	command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 	command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
-	command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', help='indicate that the soure is a DVD' )
-	command_line_disc_mutex_group.add_argument( '-B', '--bluray', action='store_true', help='indicate that the soure is a Blu-ray' )
+	command_line_disc_mutex_group.add_argument( '-D', '--dvd', action='store_true', help='indicate that the source is a DVD' )
+	command_line_disc_mutex_group.add_argument( '-B', '--bluray', action='store_true', help='indicate that the source is a Blu-ray' )
 	command_line_disc_group.add_argument( '-T', '--disc-title', default=1, type=int, help='set disc title number (default: 1)', metavar='INT' )
 	command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='force input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
 	command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='force input frame rate (required for --bluray and progressive --dvd)', metavar=( 'N', 'D' ) )
@@ -370,7 +371,7 @@ def main( argv=None ):
 
 		# Attachments
 		if extractor.attachment_cnt > 0 and not command_line.no_attachments:
-			print( 'Extracting ' + str( extractor.attachments_cnt ) + ' attachment(s) ...', end=str(), flush=True )
+			print( 'Extracting', extractor.attachment_cnt, 'attachment(s) ...', end=str(), flush=True )
 			attachments_path = os.path.join( work_dir, 'attachments' )
 			extractor.extract_attachments( attachments_path )
 			print( ' done.', flush=True )
