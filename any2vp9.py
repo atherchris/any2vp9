@@ -223,6 +223,14 @@ class AVExtractor:
 
 		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', '-nosub' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
+def encode_opus_audio( extract_proc, out_file ):
+	enc_proc = subprocess.Popen( ( 'opusenc', '--ignorelength', '--discard-comments', '-', out_file ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+	extract_proc.stdout.close()
+	if extract_proc.wait():
+		raise Exception( 'Error occurred in decoding process!' )
+	if enc_proc.wait():
+		raise Exception( 'Error occurred in encoding process!' )
+
 def encode_vorbis_audio( extract_proc, out_file ):
 	enc_proc = subprocess.Popen( ( 'oggenc', '--ignorelength', '--discard-comments', '-o', out_file, '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
@@ -321,6 +329,9 @@ def main( argv=None ):
 	command_line_picture_aspect_group.add_argument( '-x', '--pixel-aspect', nargs=2, type=int, help='set the display pixel aspect of the picture', metavar=( 'W', 'H' ) )
 	command_line_picture_aspect_group.add_argument( '-z', '--display-size', nargs=2, type=int, help='set the display dimensions of the picture', metavar=( 'W', 'H' ) )
 
+	command_line_sound_group = command_line_parser.add_argument_group( 'sound' )
+	command_line_sound_group.add_argument( '-f', '--audio-format', default='opus', type=str, choices=( 'opus', 'vorbis' ), help='choose opus or vorbis for audio format (default: opus)' )
+
 	command_line_other_group = command_line_parser.add_argument_group( 'other' )
 	command_line_other_group.add_argument( '--no-nice', action='store_true', help='do not lower process priority' )
 	command_line_other_group.add_argument( '--no-chapters', action='store_true', help='do not include chapters from DVD/Matroska source' )
@@ -390,15 +401,26 @@ def main( argv=None ):
 			subtitles_path = None
 
 		# Audio
-		audio_path = os.path.join( work_dir, 'audio.ogg' )
-		if extractor.is_matroska and extractor.chap_start is None and extractor.chap_end is None and extractor.audio_codec == 'ffvorbis':
-			print( 'Extracting audio ...', end=str(), flush=True )
-			extractor.extract_audio( audio_path )
-			print( ' done.', flush=True )
-		else:
-			print( 'Transcoding audio ...', end=str(), flush=True )
-			encode_vorbis_audio( extractor.decode_audio(), audio_path )
-			print( ' done.', flush=True )
+		if command_line.audio_format == 'opus':
+			audio_path = os.path.join( work_dir, 'audio.opus' )
+			if extractor.is_matroska and extractor.chap_start is None and extractor.chap_end is None and extractor.audio_codec == 'ffopus':
+				print( 'Extracting audio ...', end=str(), flush=True )
+				extractor.extract_audio( audio_path )
+				print( ' done.', flush=True )
+			else:
+				print( 'Transcoding audio ...', end=str(), flush=True )
+				encode_opus_audio( extractor.decode_audio(), audio_path )
+				print( ' done.', flush=True )
+		elif command_line.audio_format == 'vorbis':
+			audio_path = os.path.join( work_dir, 'audio.ogg' )
+			if extractor.is_matroska and extractor.chap_start is None and extractor.chap_end is None and extractor.audio_codec == 'ffvorbis':
+				print( 'Extracting audio ...', end=str(), flush=True )
+				extractor.extract_audio( audio_path )
+				print( ' done.', flush=True )
+			else:
+				print( 'Transcoding audio ...', end=str(), flush=True )
+				encode_vorbis_audio( extractor.decode_audio(), audio_path )
+				print( ' done.', flush=True )
 
 		# Final dimension and frame rate calculations
 		if command_line.scale is not None:
