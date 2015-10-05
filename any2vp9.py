@@ -351,6 +351,10 @@ def main( argv=None ):
 		if command_line.rate is None:
 			print( 'ERROR: You must manually input the frame rate of the input for Blu-ray sources!' )
 			return 1
+	output_suffix = os.path.splitext( command_line.output )[1].upper()
+	if output_suffix not in ( '.MKV', '.WEBM' ):
+		print( 'ERROR: Output suffix must be .mkv or .webm!' )
+		return 1
 
 	# Reduce priority
 	if not command_line.no_nice:
@@ -373,30 +377,42 @@ def main( argv=None ):
 
 		# Chapters
 		if extractor.has_chapters and not command_line.no_chapters:
-			print( 'Extracting chapters ...', end=str(), flush=True )
-			chapters_path = os.path.join( work_dir, 'chapters' )
-			extractor.extract_chapters( chapters_path )
-			print( ' done.', flush=True )
+			if output_suffix == '.WEBM':
+				print( 'WARNING: Chapters present! This is not supported in WebM container!' )
+				chapters_path = None
+			else:
+				print( 'Extracting chapters ...', end=str(), flush=True )
+				chapters_path = os.path.join( work_dir, 'chapters' )
+				extractor.extract_chapters( chapters_path )
+				print( ' done.', flush=True )
 		else:
 			chapters_path = None
 
 		# Attachments
 		if extractor.attachment_cnt > 0 and not command_line.no_attachments:
-			print( 'Extracting', extractor.attachment_cnt, 'attachment(s) ...', end=str(), flush=True )
-			attachments_path = os.path.join( work_dir, 'attachments' )
-			extractor.extract_attachments( attachments_path )
-			print( ' done.', flush=True )
+			if output_suffix == '.WEBM':
+				print( 'WARNING: Attachments present! This is not supported in WebM container!' )
+				attachments_path = None
+			else:
+				print( 'Extracting', extractor.attachment_cnt, 'attachment(s) ...', end=str(), flush=True )
+				attachments_path = os.path.join( work_dir, 'attachments' )
+				extractor.extract_attachments( attachments_path )
+				print( ' done.', flush=True )
 		else:
 			attachments_path = None
 
 		# Subtitles
 		if extractor.has_subtitles and not command_line.no_subtitles:
-			print( 'Extracting subtitles ...', end=str(), flush=True )
-			subtitles_path = os.path.join( work_dir, 'subtitles' )
-			extractor.extract_subtitles( subtitles_path )
-			if command_line.dvd:
-				subtitles_path += '.idx'
-			print( ' done.', flush=True )
+			if output_suffix == '.WEBM':
+				print( 'WARNING: Subtitles present! This is not supported in WebM container!' )
+				subtitles_path = None
+			else:
+				print( 'Extracting subtitles ...', end=str(), flush=True )
+				subtitles_path = os.path.join( work_dir, 'subtitles' )
+				extractor.extract_subtitles( subtitles_path )
+				if command_line.dvd:
+					subtitles_path += '.idx'
+				print( ' done.', flush=True )
 		else:
 			subtitles_path = None
 
@@ -421,6 +437,8 @@ def main( argv=None ):
 				print( 'Transcoding audio ...', end=str(), flush=True )
 				encode_vorbis_audio( extractor.decode_audio(), audio_path )
 				print( ' done.', flush=True )
+		else:
+			assert 0
 
 		# Final dimension and frame rate calculations
 		if command_line.scale is not None:
