@@ -197,7 +197,7 @@ class AVExtractor:
 		else:
 			return subprocess.Popen( ( 'mplayer', '-quiet', '-really-quiet', '-nocorrect-pts', '-vc', 'null', '-vo', 'null', '-channels', str( self.audio_channels ), '-ao', 'pcm:fast:file=/dev/stdout' ) + self.__mplayer_input_args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
-	def decode_video( self, denoise=False, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None ):
+	def decode_video( self, denoise=False, pp=False, scale=None, crop=None, deint=False, ivtc=False, force_rate=None, hardsub=False ):
 		filters = 'format=i420,'
 		if ivtc:
 			if crop is None:
@@ -221,7 +221,12 @@ class AVExtractor:
 			filters += 'hqdn3d,'
 		filters += 'harddup'
 
-		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', '-nosub' ), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
+		if hardsub:
+			hardsub_opt = ( '-ass', )
+		else:
+			hardsub_opt = ( '-nosub', )
+
+		return subprocess.Popen( ( 'mencoder', '-quiet', '-really-quiet', '-sws', '9', '-vf', filters ) + ofps + ( '-ovc', 'raw', '-of', 'rawvideo', '-o', '-' ) + self.__mplayer_input_args + ( '-nosound', ) + hardsub_opt, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
 
 def encode_opus_audio( extract_proc, out_file ):
 	enc_proc = subprocess.Popen( ( 'opusenc', '--ignorelength', '--discard-comments', '-', out_file ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
@@ -318,6 +323,7 @@ def main( argv=None ):
 	command_line_metadata_group.add_argument( '-S', '--subtitles-language', help='set subtitle language', metavar='LANG' )
 
 	command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
+	command_line_picture_group.add_argument( '-H', '--hardsub', action='store_true', help='overlay subtitles in picture stream' )
 	command_line_picture_group.add_argument( '-n', '--denoise', action='store_true', help='apply denoise filter' )
 	command_line_picture_group.add_argument( '-p', '--post-process', action='store_true', help='perform post-processing' )
 	command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='perform deinterlacing' )
@@ -370,7 +376,12 @@ def main( argv=None ):
 	else:
 		disc_type = None
 
-	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter, command_line.mplayer_aid, command_line.mplayer_sid )
+	if command_line.mplayer_sid is not None:
+		msid = command_line.mplayer_sid
+	elif command_line.hardsub:
+		msid = 0
+
+	extractor = AVExtractor( command_line.input, disc_type, command_line.disc_title, command_line.start_chapter, command_line.end_chapter, command_line.mplayer_aid, msid )
 
 	with tempfile.TemporaryDirectory( prefix=PROGRAM_NAME+'-' ) as work_dir:
 		print( 'Created work directory:', work_dir, '...' )
@@ -402,7 +413,7 @@ def main( argv=None ):
 			attachments_path = None
 
 		# Subtitles
-		if extractor.has_subtitles and not command_line.no_subtitles:
+		if extractor.has_subtitles and not command_line.no_subtitles and not command_line.hardsub:
 			if output_suffix == '.WEBM':
 				print( 'WARNING: Subtitles present! This is not supported in WebM container!' )
 				subtitles_path = None
@@ -462,10 +473,10 @@ def main( argv=None ):
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
 		video_path = os.path.join( work_dir, 'video.ivf' )
 		print( 'Transcoding video to VP9 format (pass 1) ...', end=str(), flush=True )
-		encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 		print( 'Transcoding video to VP9 format (pass 2) ...', end=str(), flush=True )
-		encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate ), video_path, vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, vpx_stats_path, final_dimensions, final_rate )
 		print( ' done.', flush=True )
 
 		# Mux
