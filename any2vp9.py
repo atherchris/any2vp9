@@ -298,11 +298,9 @@ def main( argv=None ):
 	# Parse command line
 	command_line_parser = argparse.ArgumentParser( description='convert videos to VP9 format' )
 	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
+	command_line_parser.add_argument( '-u', '--mplayer-aid', type=int, help='set audio track (in MPlayer aid)', metavar='INT' )
+	command_line_parser.add_argument( '-v', '--mplayer-sid', type=int, help='set subtitle track (in MPlayer sid)', metavar='INT' )
 	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
-
-	command_line_track_group = command_line_parser.add_argument_group( 'track' )
-	command_line_track_group.add_argument( '-u', '--mplayer-aid', type=int, help='set audio track (in MPlayer aid)', metavar='INT' )
-	command_line_track_group.add_argument( '-v', '--mplayer-sid', type=int, help='set subtitle track (in MPlayer sid)', metavar='INT' )
 
 	command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 	command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
@@ -312,18 +310,18 @@ def main( argv=None ):
 	command_line_disc_group.add_argument( '-Z', '--size', nargs=2, type=int, help='force input display dimensions (required for --bluray)', metavar=( 'W', 'H' ) )
 	command_line_disc_group.add_argument( '-R', '--rate', nargs=2, type=int, help='force input frame rate (required for --bluray and progressive --dvd)', metavar=( 'N', 'D' ) )
 
-	command_line_chapter_group = command_line_parser.add_argument_group( 'chapters' )
-	command_line_chapter_group.add_argument( '-C', '--start-chapter', type=int, help='start at certain chapter', metavar='INT' )
-	command_line_chapter_group.add_argument( '-E', '--end-chapter', type=int, help='stop at certain chapter', metavar='INT' )
-
 	command_line_metadata_group = command_line_parser.add_argument_group( 'metadata' )
 	command_line_metadata_group.add_argument( '-t', '--title', help='set video title', metavar='STRING' )
 	command_line_metadata_group.add_argument( '-V', '--video-language', help='set video language', metavar='LANG' )
 	command_line_metadata_group.add_argument( '-A', '--audio-language', help='set audio language', metavar='LANG' )
 	command_line_metadata_group.add_argument( '-S', '--subtitles-language', help='set subtitle language', metavar='LANG' )
 
+	command_line_chapter_group = command_line_parser.add_argument_group( 'chapters' )
+	command_line_chapter_group.add_argument( '-C', '--start-chapter', type=int, help='start at certain chapter', metavar='INT' )
+	command_line_chapter_group.add_argument( '-E', '--end-chapter', type=int, help='stop at certain chapter', metavar='INT' )
+	command_line_chapter_group.add_argument( '--no-chapters', action='store_true', help='do not include chapters from DVD/Matroska source' )
+
 	command_line_picture_group = command_line_parser.add_argument_group( 'picture' )
-	command_line_picture_group.add_argument( '-H', '--hardsub', action='store_true', help='overlay subtitles in picture stream' )
 	command_line_picture_group.add_argument( '-n', '--denoise', action='store_true', help='apply denoise filter' )
 	command_line_picture_group.add_argument( '-p', '--post-process', action='store_true', help='perform post-processing' )
 	command_line_picture_group.add_argument( '-d', '--deinterlace', action='store_true', help='perform deinterlacing' )
@@ -334,14 +332,16 @@ def main( argv=None ):
 	command_line_picture_aspect_group.add_argument( '-a', '--display-aspect', nargs=2, type=int, help='set the display aspect of the picture', metavar=( 'W', 'H' ) )
 	command_line_picture_aspect_group.add_argument( '-x', '--pixel-aspect', nargs=2, type=int, help='set the display pixel aspect of the picture', metavar=( 'W', 'H' ) )
 	command_line_picture_aspect_group.add_argument( '-z', '--display-size', nargs=2, type=int, help='set the display dimensions of the picture', metavar=( 'W', 'H' ) )
+	command_line_picture_group.add_argument( '-H', '--hardsub', action='store_true', help='overlay subtitles in picture stream' )
 
 	command_line_sound_group = command_line_parser.add_argument_group( 'sound' )
 	command_line_sound_group.add_argument( '-f', '--audio-format', default='opus', type=str, choices=( 'opus', 'vorbis' ), help='choose opus or vorbis for audio format (default: opus)' )
 
+	command_line_subtitles_group = command_line_parser.add_argument_group( 'subtitles' )
+	command_line_subtitles_group.add_argument( '-N', '--no-subtitles', action='store_true', help='do not include subtitles from DVD/Matroska source' )
+
 	command_line_other_group = command_line_parser.add_argument_group( 'other' )
 	command_line_other_group.add_argument( '--no-nice', action='store_true', help='do not lower process priority' )
-	command_line_other_group.add_argument( '--no-chapters', action='store_true', help='do not include chapters from DVD/Matroska source' )
-	command_line_other_group.add_argument( '-N', '--no-subtitles', action='store_true', help='do not include subtitles from DVD/Matroska source' )
 	command_line_other_group.add_argument( '--no-attachments', action='store_true', help='do not include attachments from Matroska source' )
 
 	if argv is None:
