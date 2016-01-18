@@ -300,7 +300,7 @@ def main( argv=None ):
 	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
 	command_line_parser.add_argument( '-u', '--mplayer-aid', type=int, help='set audio track (in MPlayer aid)', metavar='INT' )
 	command_line_parser.add_argument( '-v', '--mplayer-sid', type=int, help='set subtitle track (in MPlayer sid)', metavar='INT' )
-	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file', metavar='FILE' )
+	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file (end in .mkv or .webm)', metavar='FILE' )
 
 	command_line_disc_group = command_line_parser.add_argument_group( 'disc' )
 	command_line_disc_mutex_group = command_line_disc_group.add_mutually_exclusive_group()
