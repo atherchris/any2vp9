@@ -244,20 +244,16 @@ def encode_vorbis_audio( extract_proc, out_file ):
 	if enc_proc.wait():
 		raise Exception( 'Error occurred in encoding process!' )
 
-def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate ):
-	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
-	kf_max_dist = math.floor( framerate * 10 )
-	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--yv12', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate.numerator ) + '/' + str( framerate.denominator ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+def encode_vp9_video_pass1( extract_proc, vpx_stats, dimensions, framerate, quality ):
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + os.devnull, '--codec=vp9', '--passes=2', '--pass=1', '--fpf=' + vpx_stats, '--best', '--ivf', '--yv12', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate.numerator ) + '/' + str( framerate.denominator ), '--lag-in-frames=16', '--end-usage=q', '--kf-max-dist=' + str( math.floor( framerate * 10 ) ), '--auto-alt-ref=1', '--cq-level=' + str( quality ), '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
 	if extract_proc.wait():
 		raise Exception( 'Error occurred in decoding process!' )
 	if enc_proc.wait():
 		raise Exception( 'Error occurred in encoding process!' )
 
-def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate ):
-	bitrate = round( ( 3000 - 1000 ) / ( 1080 - 480 ) * dimensions[1] - 600 )
-	kf_max_dist = math.floor( framerate * 10 )
-	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--yv12', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate.numerator ) + '/' + str( framerate.denominator ), '--lag-in-frames=16', '--end-usage=cq', '--target-bitrate=' + str( bitrate ), '--min-q=0', '--max-q=48', '--kf-max-dist=' + str( kf_max_dist ), '--auto-alt-ref=1', '--cq-level=16', '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+def encode_vp9_video_pass2( extract_proc, out_file, vpx_stats, dimensions, framerate, quality ):
+	enc_proc = subprocess.Popen( ( 'vpxenc', '--output=' + out_file, '--codec=vp9', '--passes=2', '--pass=2', '--fpf=' + vpx_stats, '--best', '--ivf', '--yv12', '--width=' + str( dimensions[0] ), '--height=' + str( dimensions[1] ), '--fps=' + str( framerate.numerator ) + '/' + str( framerate.denominator ), '--lag-in-frames=16', '--end-usage=q', '--kf-max-dist=' + str( math.floor( framerate * 10 ) ), '--auto-alt-ref=1', '--cq-level=' + str( quality ), '--frame-parallel=1', '-' ), stdin=extract_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
 	extract_proc.stdout.close()
 	if extract_proc.wait():
 		raise Exception( 'Error occurred in decoding process!' )
@@ -298,6 +294,7 @@ def main( argv=None ):
 	# Parse command line
 	command_line_parser = argparse.ArgumentParser( description='convert videos to VP9 format' )
 	command_line_parser.add_argument( 'input', help='input video file', metavar='FILE' )
+	command_line_parser.add_argument( '-q', '--video-quality', type=int, default=20, help='set output video quality (default: 20)', metavar='INT' )
 	command_line_parser.add_argument( '-u', '--mplayer-aid', type=int, help='set audio track (in MPlayer aid)', metavar='INT' )
 	command_line_parser.add_argument( '-v', '--mplayer-sid', type=int, help='set subtitle track (in MPlayer sid)', metavar='INT' )
 	command_line_parser.add_argument( '-o', '--output', required=True, help='path for output file (end in .mkv or .webm)', metavar='FILE' )
@@ -473,10 +470,10 @@ def main( argv=None ):
 		vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
 		video_path = os.path.join( work_dir, 'video.ivf' )
 		print( 'Transcoding video to VP9 format (pass 1) ...', end=str(), flush=True )
-		encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), vpx_stats_path, final_dimensions, final_rate, command_line.video_quality )
 		print( ' done.', flush=True )
 		print( 'Transcoding video to VP9 format (pass 2) ...', end=str(), flush=True )
-		encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, vpx_stats_path, final_dimensions, final_rate )
+		encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, vpx_stats_path, final_dimensions, final_rate, command_line.video_quality )
 		print( ' done.', flush=True )
 
 		# Mux
