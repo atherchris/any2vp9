@@ -476,19 +476,19 @@ def main( argv=None ):
 			final_rate *= 2
 
 		# Transcode video
-                video_path = os.path.join( work_dir, 'video.ivf' )
-                if command_line.encoder_speed == 'rt':
-                    print( 'Transcoding video to VP9 format ...', end=str(), flush=True )
-                    encode_vp9_video_rt( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, final_dimensions, final_rate, command_line.video_quality )
-                    print( ' done.', flush=True )
-                else:
-                    vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
-                    print( 'Transcoding video to VP9 format (pass 1) ...', end=str(), flush=True )
-                    encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), vpx_stats_path, final_dimensions, final_rate, command_line.video_quality, command_line.encoder_speed )
-                    print( ' done.', flush=True )
-                    print( 'Transcoding video to VP9 format (pass 2) ...', end=str(), flush=True )
-                    encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, vpx_stats_path, final_dimensions, final_rate, command_line.video_quality, command_line.encoder_speed )
-                    print( ' done.', flush=True )
+		video_path = os.path.join( work_dir, 'video.ivf' )
+		if command_line.encoder_speed == 'rt':
+		    print( 'Transcoding video to VP9 format ...', end=str(), flush=True )
+		    encode_vp9_video_rt( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, final_dimensions, final_rate, command_line.video_quality )
+		    print( ' done.', flush=True )
+		else:
+		    vpx_stats_path = os.path.join( work_dir, 'vpx_stats' )
+		    print( 'Transcoding video to VP9 format (pass 1) ...', end=str(), flush=True )
+		    encode_vp9_video_pass1( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), vpx_stats_path, final_dimensions, final_rate, command_line.video_quality, command_line.encoder_speed )
+		    print( ' done.', flush=True )
+		    print( 'Transcoding video to VP9 format (pass 2) ...', end=str(), flush=True )
+		    encode_vp9_video_pass2( extractor.decode_video( command_line.denoise, command_line.post_process, command_line.scale, command_line.crop, command_line.deinterlace, command_line.ivtc, command_line.rate, command_line.hardsub ), video_path, vpx_stats_path, final_dimensions, final_rate, command_line.video_quality, command_line.encoder_speed )
+		    print( ' done.', flush=True )
 
 		# Mux
 		print( 'Multiplexing ...', end=str(), flush=True )
